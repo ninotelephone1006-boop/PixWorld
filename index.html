@@ -185,7 +185,7 @@
   </head>
   <body>
     <main class="game" aria-label="Jeu de plateforme PixWorld">
-      <canvas id="world" aria-label="Un personnage rectangulaire sur un sol gris, dans un ciel bleu."></canvas>
+      <canvas id="world" aria-label="Un ninja animé sur un sol gris, dans un ciel bleu."></canvas>
 
       <section class="hud" aria-label="Commandes du jeu">
         <div class="brand">
@@ -196,13 +196,14 @@
           </div>
         </div>
         <div class="controls">
-          <span class="control"><kbd>Q</kbd> gauche</span>
+          <span class="control"><kbd>A</kbd> gauche</span>
           <span class="control"><kbd>D</kbd> droite</span>
           <span class="control"><kbd class="space">ESPACE</kbd> sauter</span>
+          <span class="control"><kbd>X</kbd> attaquer</span>
         </div>
       </section>
 
-      <p class="hint">BOUGE-TOI ET SAUTE</p>
+      <p class="hint">ESPACE SAUTE · X ATTAQUE</p>
     </main>
 
     <script>
@@ -210,18 +211,29 @@
         const canvas = document.querySelector("#world");
         const ctx = canvas.getContext("2d");
         const keys = new Set();
+        const spriteSheet = new Image();
+        spriteSheet.src = "assets/ninja-black-32x32.png";
 
         const groundHeight = 84;
+        const frameSize = 32;
+        const spriteScale = 4;
+        const spriteDrawSize = frameSize * spriteScale;
+        const spriteTopPadding = 9 * spriteScale;
+        const attackDuration = 0.36;
         const player = {
           x: 112,
           y: 0,
-          width: 38,
-          height: 68,
+          width: 42,
+          height: 60,
           velocityX: 0,
           velocityY: 0,
           speed: 340,
           jumpStrength: 700,
           grounded: true,
+          facing: 1,
+          animationTime: 0,
+          attackTime: 0,
+          landingTime: 0,
         };
 
         let width = 0;
@@ -237,6 +249,7 @@
           canvas.width = Math.round(width * ratio);
           canvas.height = Math.round(height * ratio);
           ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+          ctx.imageSmoothingEnabled = false;
           groundY = Math.max(0, height - groundHeight);
           player.x = Math.min(player.x, Math.max(0, width - player.width));
           if (player.grounded) player.y = groundY - player.height;
@@ -244,16 +257,27 @@
         }
 
         function isLeftPressed() {
-          return keys.has("KeyQ") || keys.has("ArrowLeft");
+          return (
+            keys.has("KeyQ") ||
+            keys.has("KeyA") ||
+            keys.has("q") ||
+            keys.has("a") ||
+            keys.has("ArrowLeft")
+          );
         }
 
         function isRightPressed() {
-          return keys.has("KeyD") || keys.has("ArrowRight");
+          return keys.has("KeyD") || keys.has("d") || keys.has("ArrowRight");
         }
 
         function update(delta) {
+          player.animationTime += delta;
+          player.attackTime = Math.max(0, player.attackTime - delta);
+          player.landingTime = Math.max(0, player.landingTime - delta);
+
           const direction = Number(isRightPressed()) - Number(isLeftPressed());
           player.velocityX = direction * player.speed;
+          if (direction !== 0) player.facing = direction;
           player.x += player.velocityX * delta;
           player.x = Math.max(0, Math.min(width - player.width, player.x));
 
@@ -265,8 +289,57 @@
               player.y = groundY - player.height;
               player.velocityY = 0;
               player.grounded = true;
+              player.landingTime = 0.12;
             }
           }
+        }
+
+        function getSpriteFrame() {
+          if (player.attackTime > 0) {
+            const elapsed = attackDuration - player.attackTime;
+            const frame = Math.min(3, Math.floor(elapsed / (attackDuration / 4)));
+            return { column: 3, row: frame };
+          }
+
+          if (!player.grounded) {
+            return { column: 2, row: player.velocityY < 0 ? 0 : 1 };
+          }
+
+          if (player.landingTime > 0) {
+            return { column: 2, row: 2 };
+          }
+
+          if (Math.abs(player.velocityX) > 0.5) {
+            return { column: 1, row: Math.floor(player.animationTime * 10) % 4 };
+          }
+
+          return { column: 0, row: Math.floor(player.animationTime * 5) % 4 };
+        }
+
+        function drawPlayer() {
+          if (!spriteSheet.complete || spriteSheet.naturalWidth === 0) return;
+
+          const { column, row } = getSpriteFrame();
+          const sourceX = column * frameSize;
+          const sourceY = row * frameSize;
+          const centerX = player.x + player.width / 2;
+          const drawY = player.y - spriteTopPadding;
+
+          ctx.save();
+          ctx.translate(centerX, 0);
+          ctx.scale(player.facing, 1);
+          ctx.drawImage(
+            spriteSheet,
+            sourceX,
+            sourceY,
+            frameSize,
+            frameSize,
+            -spriteDrawSize / 2,
+            drawY,
+            spriteDrawSize,
+            spriteDrawSize,
+          );
+          ctx.restore();
         }
 
         function draw() {
@@ -282,12 +355,21 @@
           ctx.fillStyle = "#707982";
           ctx.fillRect(0, groundY, width, 5);
 
-          // Personnage : un simple rectangle vertical.
-          ctx.fillStyle = "#ffbf67";
-          ctx.fillRect(player.x, player.y, player.width, player.height);
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = "#173b5b";
-          ctx.strokeRect(player.x + 1, player.y + 1, player.width - 2, player.height - 2);
+          // Ombre discrète pour ancrer le sprite au sol pendant le saut.
+          ctx.fillStyle = "rgba(23, 59, 91, 0.18)";
+          ctx.beginPath();
+          ctx.ellipse(
+            player.x + player.width / 2,
+            groundY + 7,
+            player.width * (player.grounded ? 0.58 : 0.42),
+            5,
+            0,
+            0,
+            Math.PI * 2,
+          );
+          ctx.fill();
+
+          drawPlayer();
         }
 
         function frame(time) {
@@ -299,17 +381,40 @@
         }
 
         window.addEventListener("keydown", (event) => {
-          const movementKey = ["KeyQ", "KeyD", "ArrowLeft", "ArrowRight", "Space"].includes(event.code);
-          if (movementKey) event.preventDefault();
+          const keyLabel = event.key.toLowerCase();
+          const controlCode = [
+            "KeyQ",
+            "KeyA",
+            "KeyD",
+            "ArrowLeft",
+            "ArrowRight",
+            "Space",
+            "KeyX",
+          ].includes(event.code);
+          const controlLabel = ["a", "q", "d", "x"].includes(keyLabel);
+          if (controlCode || controlLabel) event.preventDefault();
+
           keys.add(event.code);
+          if (keyLabel.length === 1) keys.add(keyLabel);
 
           if (event.code === "Space" && !event.repeat && player.grounded) {
             player.velocityY = -player.jumpStrength;
             player.grounded = false;
           }
+
+          if (
+            (event.code === "KeyX" || keyLabel === "x") &&
+            !event.repeat &&
+            player.attackTime === 0
+          ) {
+            player.attackTime = attackDuration;
+          }
         });
 
-        window.addEventListener("keyup", (event) => keys.delete(event.code));
+        window.addEventListener("keyup", (event) => {
+          keys.delete(event.code);
+          keys.delete(event.key.toLowerCase());
+        });
         window.addEventListener("blur", () => keys.clear());
         window.addEventListener("resize", resize);
 
