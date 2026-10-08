@@ -44,6 +44,7 @@
         display: block;
         width: 100%;
         height: 100%;
+        cursor: crosshair;
       }
 
       .hud {
@@ -200,10 +201,11 @@
           <span class="control"><kbd>D</kbd> droite</span>
           <span class="control"><kbd class="space">ESPACE</kbd> sauter</span>
           <span class="control"><kbd>X</kbd> attaquer</span>
+          <span class="control"><kbd class="space">CLIC G</kbd> attaquer</span>
         </div>
       </section>
 
-      <p class="hint">ESPACE SAUTE · X ATTAQUE</p>
+      <p class="hint">ESPACE SAUTE · X OU CLIC GAUCHE ATTAQUE</p>
     </main>
 
     <script>
@@ -214,7 +216,35 @@
         const spriteSheet = new Image();
         spriteSheet.src = "assets/ninja-black-32x32.png";
 
-        const groundHeight = 84;
+        // Décor pixel art « Sunny Land » (Ansimuz, CC0) : ciel, collines et
+        // tuiles de sol, dessinés en parallaxe derrière le ninja.
+        const skyLayer = new Image();
+        skyLayer.src = "assets/background/sky-back.png";
+        const hillsLayer = new Image();
+        hillsLayer.src = "assets/background/hills-middle.png";
+        const tileset = new Image();
+        tileset.src = "assets/background/tileset.png";
+
+        const tileSize = 16;
+        const tileScale = 4;
+        const tileDraw = tileSize * tileScale;
+        const groundHeight = tileDraw * 2;
+        // Réglages des couches de parallaxe (facteur de défilement caméra).
+        const skyFactor = 0.1;
+        const hillsFactor = 0.32;
+        const foregroundFactor = 1.3;
+        // Tuiles de terre (variants) et touffes d'herbe dans la feuille.
+        const dirtTiles = [
+          [16, 48],
+          [80, 48],
+          [16, 80],
+          [48, 80],
+        ];
+        const grassTopTile = [48, 16];
+        const tuftTiles = [
+          [16, 115],
+          [48, 115],
+        ];
         const frameSize = 32;
         const spriteScale = 4;
         const spriteDrawSize = frameSize * spriteScale;
@@ -240,6 +270,14 @@
         let height = 0;
         let groundY = 0;
         let lastTime = 0;
+        let worldWidth = 0;
+        let camX = 0;
+
+        // Petit hash déterministe pour varier terre et herbe sans aléatoire.
+        function hash(n) {
+          const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+          return x - Math.floor(x);
+        }
 
         function resize() {
           const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -251,7 +289,8 @@
           ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
           ctx.imageSmoothingEnabled = false;
           groundY = Math.max(0, height - groundHeight);
-          player.x = Math.min(player.x, Math.max(0, width - player.width));
+          worldWidth = Math.max(width * 2, 1200);
+          player.x = Math.max(0, Math.min(worldWidth - player.width, player.x));
           if (player.grounded) player.y = groundY - player.height;
           draw();
         }
@@ -279,7 +318,15 @@
           player.velocityX = direction * player.speed;
           if (direction !== 0) player.facing = direction;
           player.x += player.velocityX * delta;
-          player.x = Math.max(0, Math.min(width - player.width, player.x));
+          player.x = Math.max(0, Math.min(worldWidth - player.width, player.x));
+
+          // Caméra qui suit le joueur, bornée au monde : c'est elle qui fait
+          // défiler les couches de parallaxe à des vitesses différentes.
+          const target = Math.max(
+            0,
+            Math.min(worldWidth - width, player.x + player.width / 2 - width / 2),
+          );
+          camX += (target - camX) * Math.min(1, delta * 10);
 
           if (!player.grounded) {
             player.velocityY += 1900 * delta;
@@ -322,7 +369,7 @@
           const { column, row } = getSpriteFrame();
           const sourceX = column * frameSize;
           const sourceY = row * frameSize;
-          const centerX = player.x + player.width / 2;
+          const centerX = player.x + player.width / 2 - camX;
           const drawY = player.y - spriteTopPadding;
 
           ctx.save();
@@ -342,24 +389,134 @@
           ctx.restore();
         }
 
-        function draw() {
-          ctx.clearRect(0, 0, width, height);
+        // Répète horizontalement une image de décor, décalée par la caméra
+        // multipliée par le facteur de parallaxe de la couche.
+        function drawTiledLayer(img, factor, drawH, bottomY) {
+          const scale = drawH / img.height;
+          const drawW = img.width * scale;
+          if (!(drawW > 0)) return;
+          let off = (camX * factor) % drawW;
+          if (off < 0) off += drawW;
+          for (let x = -off; x < width; x += drawW) {
+            ctx.drawImage(img, x, bottomY - drawH, drawW, drawH);
+          }
+        }
 
-          // Ciel bleu uni.
+        function drawBackground() {
+          // Ciel de secours tant que les images ne sont pas chargées.
           ctx.fillStyle = "#58a6e8";
           ctx.fillRect(0, 0, width, height);
 
-          // Sol gris.
-          ctx.fillStyle = "#858c94";
-          ctx.fillRect(0, groundY, width, height - groundY);
-          ctx.fillStyle = "#707982";
-          ctx.fillRect(0, groundY, width, 5);
+          if (skyLayer.complete && skyLayer.naturalWidth > 0) {
+            drawTiledLayer(skyLayer, skyFactor, height, height);
+          }
+          if (hillsLayer.complete && hillsLayer.naturalWidth > 0) {
+            drawTiledLayer(hillsLayer, hillsFactor, height * 0.85, height);
+          }
+        }
+
+        function drawGround() {
+          if (!(tileset.complete && tileset.naturalWidth > 0)) {
+            // Sol gris de secours avant chargement de la feuille de tuiles.
+            ctx.fillStyle = "#858c94";
+            ctx.fillRect(0, groundY, width, height - groundY);
+            return;
+          }
+
+          const firstTile = Math.floor(camX / tileDraw);
+          const startX = -(camX % tileDraw);
+          const rows = Math.ceil((height - groundY) / tileDraw);
+          const tuftW = tileSize * 3;
+          const tuftH = 13 * 3;
+
+          for (let c = 0; startX + c * tileDraw < width; c++) {
+            const worldTile = firstTile + c;
+            const x = startX + c * tileDraw;
+
+            ctx.drawImage(
+              tileset,
+              grassTopTile[0],
+              grassTopTile[1],
+              tileSize,
+              tileSize,
+              x,
+              groundY,
+              tileDraw,
+              tileDraw,
+            );
+            for (let r = 1; r <= rows; r++) {
+              const dirt = dirtTiles[Math.floor(hash(worldTile * 7 + r * 131) * dirtTiles.length)];
+              ctx.drawImage(
+                tileset,
+                dirt[0],
+                dirt[1],
+                tileSize,
+                tileSize,
+                x,
+                groundY + r * tileDraw,
+                tileDraw,
+                tileDraw,
+              );
+            }
+
+            // Touffes d'herbe décoratives, posées de façon déterministe.
+            if (hash(worldTile + 999) < 0.2) {
+              const tuft = tuftTiles[Math.floor(hash(worldTile + 777) * tuftTiles.length)];
+              ctx.drawImage(
+                tileset,
+                tuft[0],
+                tuft[1],
+                tileSize,
+                13,
+                x + (tileDraw - tuftW) / 2,
+                groundY - tuftH + 4,
+                tuftW,
+                tuftH,
+              );
+            }
+          }
+        }
+
+        // Herbes au premier plan, défilant plus vite que le sol : renforce
+        // l'effet de profondeur de la parallaxe.
+        function drawForeground() {
+          if (!(tileset.complete && tileset.naturalWidth > 0)) return;
+          const tuftW = tileSize * 3;
+          const tuftH = 13 * 3;
+          const scroll = camX * foregroundFactor;
+          const firstTile = Math.floor(scroll / tuftW);
+          const startX = -(scroll % tuftW);
+
+          for (let c = 0; startX + c * tuftW < width; c++) {
+            const worldTile = firstTile + c;
+            if (hash(worldTile + 555) < 0.45) {
+              const tuft = tuftTiles[Math.floor(hash(worldTile + 313) * tuftTiles.length)];
+              ctx.drawImage(
+                tileset,
+                tuft[0],
+                tuft[1],
+                tileSize,
+                13,
+                startX + c * tuftW,
+                height - tuftH + 8,
+                tuftW,
+                tuftH,
+              );
+            }
+          }
+        }
+
+        function draw() {
+          ctx.clearRect(0, 0, width, height);
+
+          drawBackground();
+          drawGround();
 
           // Ombre discrète pour ancrer le sprite au sol pendant le saut.
           ctx.fillStyle = "rgba(23, 59, 91, 0.18)";
           ctx.beginPath();
           ctx.ellipse(
-            player.x + player.width / 2,
+            player.x + player.width / 2 - camX,
             groundY + 7,
             player.width * (player.grounded ? 0.58 : 0.42),
             5,
@@ -370,6 +527,7 @@
           ctx.fill();
 
           drawPlayer();
+          drawForeground();
         }
 
         function frame(time) {
@@ -416,6 +574,19 @@
           keys.delete(event.key.toLowerCase());
         });
         window.addEventListener("blur", () => keys.clear());
+
+        // Clic gauche : attaque dans la direction du curseur.
+        window.addEventListener("pointerdown", (event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          const rect = canvas.getBoundingClientRect();
+          const clickX = event.clientX - rect.left;
+          const playerScreenX = player.x + player.width / 2 - camX;
+          if (Math.abs(clickX - playerScreenX) > 4) {
+            player.facing = clickX > playerScreenX ? 1 : -1;
+          }
+          if (player.attackTime === 0) player.attackTime = attackDuration;
+        });
         window.addEventListener("resize", resize);
 
         resize();
