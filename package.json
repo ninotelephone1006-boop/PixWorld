@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server/server.js",
     "dev": "node server/server.js",
-    "test": "node test/characters.test.js && node test/audio.test.js && node test/effects.test.js && node test/net.test.js"
+    "build:sfx": "node tools/build-sfx.mjs",
+    "test": "node test/characters.test.js && node test/audio.test.js && node test/sfx-bank.test.js && node test/effects.test.js && node test/net.test.js"
   },
   "engines": {
     "node": ">=18"

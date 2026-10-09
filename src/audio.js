@@ -1,12 +1,17 @@
 /**
- * PixWorld — effets sonores procéduraux.
+ * PixWorld — effets sonores, fichiers adaptés + synthèse de secours.
  *
- * Aucun fichier audio : chaque son est synthétisé à la volée avec un petit
- * moteur dérivé de ZzFX (Frank Force, licence MIT, voir assets/CREDITS.md).
- * Les presets ci-dessous décrivent une quarantaine d'effets : interface,
- * déplacements, attaques de chaque héros, impacts, K.O., réapparition,
- * réseau… Les sons des autres joueurs sont spatialisés (balance stéréo et
- * atténuation selon leur distance à la caméra).
+ * Deux sources, une seule API :
+ *
+ *   1. une banque de près de 200 fichiers Wave (assets/sfx/), repris de packs
+ *      libres CC0 publiés sur GitHub puis adaptés par tools/build-sfx.mjs ;
+ *      chaque événement possède plusieurs variantes, tirées au hasard pour
+ *      qu'un enchaînement de coups ne sonne jamais deux fois pareil ;
+ *   2. une synthèse maison, dérivée de ZzFX (Frank Force, licence MIT, voir
+ *      assets/CREDITS.md), qui prend le relais quand un fichier n'est pas
+ *      encore chargé ou n'a pas pu l'être (page ouverte en file://, hors
+ *      ligne…). Les **pas** sont volontairement toujours générés en code :
+ *      une famille par matière, plusieurs variantes chacune.
  *
  *   PixWorldAudio.play("jump")                      → son local
  *   PixWorldAudio.playAt("slash", worldX)           → son d'un joueur distant
@@ -14,7 +19,8 @@
  *   PixWorldAudio.setVolume(0.8) / toggleMuted()     → réglages mémorisés
  *
  * Le contexte audio n'est créé qu'au premier geste de l'utilisateur, comme
- * l'exigent les navigateurs.
+ * l'exigent les navigateurs ; les fichiers sont alors décodés en tâche de
+ * fond, les plus utiles d'abord.
  */
 window.PixWorldAudio = (() => {
   "use strict";
@@ -85,6 +91,62 @@ window.PixWorldAudio = (() => {
     connectionLost: [0.65, 0.02, 220, 0.02, 0.2, 0.25, 2, 1.5, -3, 0, 0, 0, 0.05, 0, 0, 0, 0, 0.6],
     connected: [0.55, 0.02, 523, 0.01, 0.08, 0.3, 0, 1, 0, 0, 262, 0.1, 0, 0, 0, 0, 0.05, 0.6],
   };
+
+  // ─────────────────── Pas : générés en code, aucune sample ───────────────────
+  // Une famille par matière, STEP_VARIANTS bruits chacune. Les paramètres
+  // sont figés par (matière, variante) via un petit hachage : deux pas de
+  // suite ne se ressemblent pas, mais le même pas reste identique d'une
+  // partie à l'autre. Aucun fichier n'est nécessaire, contrairement au reste
+  // de la banque (voir tools/build-sfx.mjs, qui ignore volontairement « step »).
+  const STEP_MATERIALS = {
+    grass: { frequency: 230, noise: 1, release: 0.05, filter: -1400, volume: 0.2, spread: 0.14 },
+    dirt: { frequency: 185, noise: 1, release: 0.045, filter: -1100, volume: 0.22, spread: 0.12 },
+    stone: { frequency: 330, noise: 0.65, release: 0.035, filter: 1200, volume: 0.2, spread: 0.16 },
+    wood: { frequency: 150, noise: 0.5, release: 0.075, filter: -650, volume: 0.24, spread: 0.1 },
+    snow: { frequency: 420, noise: 1, release: 0.055, filter: 1800, volume: 0.18, spread: 0.18 },
+  };
+  const STEP_VARIANTS = 6;
+  let footstepMaterial = "grass";
+
+  const stepName = (material, variant) => `step${material[0].toUpperCase()}${material.slice(1)}${variant}`;
+  const STEP_PATTERN = /^step([A-Z][a-z]+)(\d+)$/;
+
+  /** Hachage déterministe (FNV-1a) → valeur dans [-1, 1]. */
+  function jitter(text) {
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+      hash = (hash ^ text.charCodeAt(i)) * 16777619;
+      hash >>>= 0;
+    }
+    return (hash / 2147483647.5) - 1;
+  }
+
+  /** Paramètres ZzFX d'un pas : bruit filtré, très court. */
+  function stepPreset(material, variant) {
+    const base = STEP_MATERIALS[material];
+    const seed = `${material}${variant}`;
+    const wobble = (salt, amount) => 1 + jitter(seed + salt) * amount;
+    const params = new Array(21).fill(0);
+    params[0] = base.volume * wobble("vol", 0.25); // volume
+    params[2] = base.frequency * wobble("freq", base.spread); // fréquence
+    params[3] = 0.001; // attaque
+    params[4] = 0.004; // tenue
+    params[5] = base.release * wobble("rel", 0.3); // extinction
+    params[6] = 4; // forme : bruit
+    params[7] = 1; // courbe
+    params[13] = base.noise; // part de bruit
+    params[17] = 0.5; // niveau de la tenue
+    params[20] = base.filter * wobble("filter", 0.08); // filtre
+    return params;
+  }
+
+  // Enregistre les pas comme n'importe quel autre preset : ils sont ensuite
+  // synthétisés et mis en cache exactement de la même façon.
+  Object.keys(STEP_MATERIALS).forEach((material) => {
+    for (let variant = 1; variant <= STEP_VARIANTS; variant++) {
+      PRESETS[stepName(material, variant)] = stepPreset(material, variant);
+    }
+  });
 
   // ───────────────────────── Synthèse (ZzFX) ─────────────────────────
   /**
@@ -216,6 +278,28 @@ window.PixWorldAudio = (() => {
     return b;
   }
 
+  // ─────────────────── Banque de fichiers (assets/sfx) ───────────────────
+  // Chaque événement → plusieurs variantes Wave + un gain d'équilibrage.
+  // Le chargement est paresseux : on ne télécharge que ce qu'on entend, en
+  // commençant par les sons les plus fréquents (voir preloadBank).
+  const BANK =
+    typeof window !== "undefined" && window.PixWorldSfxLibrary ? window.PixWorldSfxLibrary.events || {} : {};
+  const BANK_PATH = "assets/sfx/";
+  const BANK_EVENTS = Object.keys(BANK);
+  const bankBuffers = Object.create(null); // événement → [AudioBuffer]
+  const bankPending = Object.create(null); // événement → promesse en cours
+  const bankCursor = Object.create(null); // dernière variante jouée
+  const preloaded = new Set();
+
+  // Sons entendus dès les premières secondes : interface, sauts et coups.
+  const PRELOAD_FIRST = [
+    "uiHover", "uiSelect", "uiConfirm", "uiBack", "uiType", "uiError", "uiToggleOn", "uiToggleOff", "toast",
+    "jump", "land", "hurt", "hurtCritical", "impactSpark",
+    "throwShuriken", "bowDraw", "bowRelease", "slash", "slashHeavy", "chargeOrb", "castOrb",
+    "hitShuriken", "hitArrow", "hitSlash", "hitOrb", "fizzle",
+    "ko", "koBoom", "koEnemy", "respawn", "regen", "playerJoin", "playerLeave", "connected",
+  ];
+
   // ───────────────────────── Lecture ─────────────────────────
   const supported = typeof window !== "undefined" && typeof (window.AudioContext || window.webkitAudioContext) === "function";
   let context = null;
@@ -287,17 +371,83 @@ window.PixWorldAudio = (() => {
     return true;
   }
 
+  // ─────────────────── Chargement des fichiers de la banque ───────────────────
+  function decodeAudio(data) {
+    return new Promise((resolve) => {
+      const done = (buffer) => resolve(buffer || null);
+      try {
+        const result = context.decodeAudioData(data, done, () => done(null));
+        if (result && typeof result.then === "function") result.then(done, () => done(null));
+      } catch (error) {
+        done(null);
+      }
+    });
+  }
+
+  /** Télécharge et décode une variante. Renvoie null en cas d'échec. */
+  function fetchVariant(file) {
+    if (typeof fetch !== "function") return Promise.resolve(null);
+    return fetch(BANK_PATH + file)
+      .then((response) => (response.ok ? response.arrayBuffer() : Promise.reject(new Error(file))))
+      .then((data) => (context ? decodeAudio(data) : null))
+      .catch(() => null);
+  }
+
+  /** Décode toutes les variantes d'un événement (une seule fois). */
+  function loadEvent(name) {
+    if (!BANK[name] || bankBuffers[name] || !context) return bankPending[name] || Promise.resolve(null);
+    if (bankPending[name]) return bankPending[name];
+    const promise = Promise.all(BANK[name].files.map(fetchVariant))
+      .then((list) => {
+        const buffers = list.filter(Boolean);
+        if (buffers.length) bankBuffers[name] = buffers;
+        bankPending[name] = null;
+        return buffers;
+      })
+      .catch(() => {
+        bankPending[name] = null;
+        return [];
+      });
+    bankPending[name] = promise;
+    return promise;
+  }
+
+  /**
+   * Précharge une liste d'événements, par petits groupes pour ne pas saturer
+   * le réseau. Le reste de la banque se charge ensuite à la demande.
+   */
+  function preloadBank(names) {
+    const queue = (names || BANK_EVENTS).filter((name) => BANK[name] && !preloaded.has(name));
+    queue.forEach((name) => preloaded.add(name));
+    let index = 0;
+    const worker = () => {
+      if (index >= queue.length) return Promise.resolve();
+      const batch = queue.slice(index, index + 6);
+      index += batch.length;
+      return Promise.all(batch.map(loadEvent)).then(worker);
+    };
+    return worker();
+  }
+
   /** À appeler sur un geste utilisateur : débloque le contexte audio. */
   function unlock() {
     if (!ensureContext()) return;
     unlocked = true;
     // Pré-calcule les sons les plus fréquents pendant que le menu est ouvert.
     ["jump", "land", "step", "hurt", "uiSelect", "uiHover"].forEach(samplesFor);
+    // Puis décode les fichiers : les sons courants d'abord, le reste ensuite.
+    if (BANK_EVENTS.length) {
+      preloadBank(PRELOAD_FIRST).then(() => {
+        if (typeof window !== "undefined" && window.setTimeout) {
+          window.setTimeout(() => preloadBank(BANK_EVENTS), 1500);
+        }
+      });
+    }
   }
 
-  function playSamples(samples, options) {
-    if (!unlocked || !context || !samples || !samples.length) return null;
-    if (muted) return null;
+  /** Branche une source déjà prête (buffer décodé ou échantillons maison). */
+  function startVoice(source, seconds, options) {
+    if (!unlocked || !context || muted) return null;
     if (context.state !== "running") {
       context.resume().catch(() => {});
       if (context.state !== "running") return null;
@@ -310,10 +460,6 @@ window.PixWorldAudio = (() => {
     }
     if (voices.length >= MAX_VOICES && !(options && options.important)) return null;
 
-    const buffer = context.createBuffer(1, samples.length, SAMPLE_RATE);
-    buffer.getChannelData(0).set(samples);
-    const source = context.createBufferSource();
-    source.buffer = buffer;
     source.playbackRate.value = options.rate;
 
     const gain = context.createGain();
@@ -328,7 +474,7 @@ window.PixWorldAudio = (() => {
     node.connect(gain);
     gain.connect(master);
 
-    voices.push(now + samples.length / SAMPLE_RATE / Math.max(0.2, options.rate) + 0.05);
+    voices.push(now + seconds / Math.max(0.2, options.rate) + 0.05);
     source.onended = () => {
       try {
         source.disconnect();
@@ -341,15 +487,76 @@ window.PixWorldAudio = (() => {
     return source;
   }
 
+  function playSamples(samples, options) {
+    if (!unlocked || !context || !samples || !samples.length) return null;
+    const buffer = context.createBuffer(1, samples.length, SAMPLE_RATE);
+    buffer.getChannelData(0).set(samples);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    return startVoice(source, samples.length / SAMPLE_RATE, options);
+  }
+
+  /** Joue un buffer déjà décodé (variante de la banque). */
+  function playBuffer(buffer, options) {
+    if (!unlocked || !context || !buffer) return null;
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    return startVoice(source, buffer.duration, options);
+  }
+
+  /** Variante aléatoire, jamais deux fois la même de suite. */
+  function pickVariant(name, buffers) {
+    if (buffers.length === 1) return buffers[0];
+    let index = Math.floor(Math.random() * buffers.length);
+    if (index === bankCursor[name]) index = (index + 1) % buffers.length;
+    bankCursor[name] = index;
+    return buffers[index];
+  }
+
   /**
-   * Joue un preset. options : { volume, pitch, pan, randomness, important }.
+   * Résout le nom d'un son : « step » devient une variante générée en code
+   * (matière courante + numéro tiré au sort), les autres noms restent ceux
+   * de la banque / des presets.
+   */
+  function resolveName(name, opts) {
+    if (name !== "step") return name;
+    const wanted = opts && opts.material;
+    const material = (wanted && STEP_MATERIALS[wanted] ? wanted : STEP_MATERIALS[footstepMaterial] ? footstepMaterial : "grass");
+    return stepName(material, 1 + Math.floor(Math.random() * STEP_VARIANTS));
+  }
+
+  /**
+   * Joue un son. options : { volume, pitch, pan, randomness, material,
+   * important }. Les fichiers de la banque sont prioritaires ; tant qu'ils
+   * ne sont pas décodés (ou s'ils sont inaccessibles), la synthèse prend le
+   * relais — le jeu n'est jamais silencieux.
    */
   function play(name, options) {
-    const samples = samplesFor(name);
-    if (!samples) return null;
-    const preset = PRESETS[name];
     const opts = options || {};
-    const randomness = opts.randomness == null ? preset[1] || 0 : opts.randomness;
+    const resolved = resolveName(name, opts);
+
+    const buffers = bankBuffers[resolved];
+    if (buffers && buffers.length) {
+      const entry = BANK[resolved];
+      const pitch = opts.pitch == null ? 1 : opts.pitch;
+      const rate = pitch * (0.97 + Math.random() * 0.06);
+      return playBuffer(pickVariant(resolved, buffers), {
+        rate: clamp(rate, 0.2, 4),
+        gain: clamp((opts.volume == null ? 1 : opts.volume) * (entry ? entry.gain : 1), 0, 2),
+        pan: clamp(opts.pan || 0, -1, 1),
+        important: Boolean(opts.important),
+      });
+    }
+    // Pas encore chargé : on lance le téléchargement et on joue la synthèse.
+    if (BANK[resolved] && !preloaded.has(resolved)) {
+      preloaded.add(resolved);
+      loadEvent(resolved);
+    }
+
+    const samples = samplesFor(resolved);
+    if (!samples) return null;
+    const preset = PRESETS[resolved];
+    const randomness = resolved === "step" || preset[1] == null ? 0.06 : preset[1] || 0;
     const pitch = opts.pitch == null ? 1 : opts.pitch;
     const rate = pitch + pitch * randomness * (Math.random() * 2 - 1);
     return playSamples(samples, {
@@ -448,6 +655,26 @@ window.PixWorldAudio = (() => {
     play,
     playAt,
     sequence,
+    /** Événements disposant de fichiers, et combien ont déjà été décodés. */
+    get bank() {
+      return {
+        events: BANK_EVENTS.slice(),
+        path: BANK_PATH,
+        files: BANK_EVENTS.reduce((total, name) => total + BANK[name].files.length, 0),
+        loaded: Object.keys(bankBuffers).length,
+      };
+    },
+    /** Matière des pas : grass, dirt, stone, wood, snow (générés en code). */
+    get footstepMaterial() {
+      return footstepMaterial;
+    },
+    setFootstepMaterial(material) {
+      if (STEP_MATERIALS[material]) footstepMaterial = material;
+      return footstepMaterial;
+    },
+    footstepMaterials: Object.keys(STEP_MATERIALS),
+    preload: preloadBank,
+    loadEvent,
     setVolume,
     setMuted,
     toggleMuted,

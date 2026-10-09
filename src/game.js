@@ -1199,7 +1199,8 @@
       if (player.stepTimer <= 0) {
         player.stepTimer = 0.24;
         player.stepCount++;
-        sfx("step", { volume: 0.8, pitch: player.stepCount % 2 ? 1 : 1.12 });
+        // Les pas sont générés en code : une variante différente à chaque fois.
+        sfx("step", { volume: 0.8 });
         if (player.stepCount % 2 === 0) {
           fx.dust(player.x + player.width / 2 - player.facing * 10, groundY, { count: 2, direction: player.facing });
         }
