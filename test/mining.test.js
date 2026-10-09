@@ -72,6 +72,29 @@ assert.equal(shared.inventory().grass, 1);
 shared.removeDrop("p2:9");
 assert.equal(shared.inventory().grass, 1, "Ramasser le drop d'un autre joueur ne modifie pas son inventaire");
 
+// ─────────── Instantané du terrain (partage entre joueurs, sans serveur) ───────────
+const snap = Mining.create({ worldWidth: 96, blockSize: 32 });
+snap.breakBlock(0, 0, { baseY, dropId: "p1:1", ownerId: "p1", networked: true });
+snap.breakBlock(1, 1, { baseY, dropId: "local:2", networked: false }); // drop purement local
+snap.placeBlock(2, -1, "dirt");
+const state = snap.snapshot();
+// Les tableaux viennent du bac à sable : on les recopie dans ce royaume
+// avant de les comparer strictement (les prototypes y sont différents).
+assert.deepEqual(Array.from(state.mined, (cell) => Array.from(cell)), [[0, 0], [1, 1]],
+  "L'instantané liste les blocs cassés");
+assert.deepEqual(Array.from(state.placed, (cell) => Array.from(cell)), [[2, -1, "dirt"]],
+  "L'instantané liste les blocs posés");
+assert.deepEqual(
+  Array.from(state.drops, (drop) => ({ ...drop })),
+  [{ id: "p1:1", column: 0, row: 0, type: "grass", ownerId: "p1" }],
+  "Seuls les drops réseau sont partagés, pas les drops locaux",
+);
+const restored = Mining.create({ worldWidth: 96, blockSize: 32 });
+restored.applyState(state);
+assert.equal(restored.isRemoved(0, 0), true, "L'instantané se réapplique ailleurs");
+assert.equal(restored.isPlaced(2, -1), true);
+assert.equal(restored.getDrops().some((drop) => drop.id === "p1:1"), true, "L'instantané recrée les drops réseau");
+
 // ─────────── Collisions : ni traverse-muraille, ni chute dans le vide ───────────
 const arena = Mining.create({ worldWidth: 320, blockSize: 32 });
 // Au sol, un corps est soutenu par la surface.

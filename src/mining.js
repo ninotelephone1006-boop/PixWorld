@@ -391,6 +391,30 @@ window.PixWorldMining = (() => {
       drops.forEach((drop) => { drop.pending = false; });
     }
 
+    /**
+     * État complet du terrain, dans la même forme que l'instantané envoyé par
+     * le serveur dans son « welcome » : mined (blocs cassés), placed (blocs
+     * posés) et drops encore au sol. Sert en direct entre joueurs (sans
+     * serveur) pour présenter le terrain à un nouveau venu. Les drops purement
+     * locaux (minés hors ligne) ne sont pas partagés.
+     */
+    function snapshot() {
+      return {
+        mined: Array.from(removed, (key) => key.split(",").map(Number)),
+        placed: Array.from(placed.entries(), ([key, type]) => {
+          const [column, row] = key.split(",").map(Number);
+          return [column, row, type];
+        }),
+        drops: Array.from(drops.values(), (drop) => (drop.networked ? {
+          id: drop.id,
+          column: drop.column,
+          row: drop.row,
+          type: drop.type,
+          ownerId: drop.ownerId,
+        } : null)).filter(Boolean),
+      };
+    }
+
     function updateDrops(delta, baseY) {
       const dt = clamp(Number(delta) || 0, 0, 0.05);
       const base = Number(baseY) || 0;
@@ -661,6 +685,7 @@ window.PixWorldMining = (() => {
       landingTop,
       breakBlock,
       applyState,
+      snapshot,
       clearPendingClaims,
       updateDrops,
       findTouchedDrops,

@@ -17,7 +17,8 @@
  * graine commune à tous les joueurs. Le rendu des biomes est dans
  * src/scenery.js.
  *
- * Tous les joueurs rejoignent le serveur WebSocket du site : voir src/net.js.
+ * Tous les joueurs rejoignent la même arène : le serveur WebSocket du site
+ * quand il existe, sinon le direct entre joueurs (WebRTC) — voir src/net.js.
  */
 (() => {
   "use strict";
@@ -452,6 +453,7 @@
 
   function describeMode(mode) {
     if (mode === "online") return { label: "en ligne", tone: "online", text: "Tu es dans l’arène commune. Invite tes amis avec le lien du jeu !" };
+    if (mode === "p2p") return { label: "en ligne (direct)", tone: "online", text: "Connecté en direct aux autres joueurs : même lien, mêmes amis, même depuis un autre réseau." };
     if (mode === "reconnect") return { label: "reconnexion", tone: "local", text: "Arène indisponible, nouvelle tentative automatique…" };
     if (mode === "full") return { label: "arène pleine", tone: "local", text: "L’arène est pleine. Nouvelle tentative automatique…" };
     if (mode === "unavailable") return { label: "hors ligne", tone: "solo", text: "Ouvre le lien du jeu hébergé pour rejoindre les autres joueurs." };
@@ -462,8 +464,8 @@
     const target = net && net.serverInfo;
     if (!menuServerShare) return;
     menuServerShare.hidden = !target;
-    if (target) menuServerAddress.textContent = target.httpUrl + "/";
-    if (menuServerHint) menuServerHint.textContent = "Partage le lien du jeu : tes amis rejoignent la même arène, sans configuration. Le site doit être accessible sur Internet pour jouer depuis des réseaux différents.";
+    if (target) menuServerAddress.textContent = target.shareUrl;
+    if (menuServerHint) menuServerHint.textContent = "Partage le lien du jeu : tes amis rejoignent la même arène depuis n’importe quel réseau, sans configuration. Ajoute ?room=nom au lien pour une salle privée.";
   }
 
   /** Copie l'adresse à partager dans le presse-papiers. */
@@ -508,7 +510,9 @@
     const target = net ? net.serverInfo : null;
     playersPanel.dataset.mode = mode;
     playersMode.textContent = info.label;
-    playersMode.title = target ? "Serveur : " + target.display : "";
+    playersMode.title = !target ? "" : target.transport === "p2p"
+      ? "Direct entre joueurs (WebRTC), sans serveur"
+      : "Serveur : " + target.display;
     if (!playing) setStatus(info.text, info.tone);
 
     if (lastMode === "reconnect" && mode === "online") {
@@ -825,12 +829,21 @@
         updateHotbar();
         break;
       }
+      case "miningState": {
+        // En direct (sans serveur), un pair nous envoie l'état complet du
+        // terrain : blocs déjà cassés, blocs posés et drops encore au sol.
+        mining.applyState(message.mining || {});
+        break;
+      }
       case "join": {
         const isNew = addPeer(message.player);
         if (isNew && message.player) {
           const peer = others.get(message.player.id);
           toast((peer ? peer.name : "Quelqu'un") + " a rejoint la partie", true);
           sfx("playerJoin");
+          // En direct, pas de serveur pour résumer le terrain : chacun envoie
+          // le sien au nouveau venu.
+          if (net && net.mode === "p2p") shareMiningStateWith(message.player.id);
         }
         panelDirty = true;
         break;
@@ -1346,13 +1359,40 @@
     }
   }
 
+  /**
+   * Envoie l'état complet du terrain à un pair (arène directe, sans serveur).
+   * Un état vide n'est jamais envoyé : appliqué chez le destinataire, il
+   * effacerait les blocs qu'il a posés lui-même.
+   */
+  function shareMiningStateWith(peerId) {
+    if (!net || !peerId) return;
+    const state = mining.snapshot();
+    if (!state.mined.length && !state.placed.length && !state.drops.length) return;
+    net.sendMiningState(peerId, state);
+  }
+
   function requestMiningBreak(block) {
     if (!block || miningRequestedKey === block.key) return;
     miningRequestedKey = block.key;
     const serial = miningSequence++;
-    const connected = net && net.mode === "online" && hasJoined && myId;
-    if (connected) {
+    const mode = net && net.mode;
+    if (net && mode === "online" && hasJoined && myId) {
       pendingMiningSerials.add(serial);
+      net.mineBlock(block.column, block.row, serial);
+      return;
+    }
+    if (net && mode === "p2p" && hasJoined && myId) {
+      // En direct, pas de serveur pour valider : on casse tout de suite (avec
+      // le même identifiant de drop que celui annoncé aux pairs), puis on
+      // leur transmet l'événement. Un bloc déjà cassé ne produit rien.
+      const broken = mining.breakBlock(block.column, block.row, {
+        baseY: groundY,
+        dropId: myId + ":" + serial,
+        ownerId: myId,
+        networked: true,
+      });
+      if (!broken) return;
+      blockBreakFeedback(broken, false);
       net.mineBlock(block.column, block.row, serial);
       return;
     }
@@ -1420,14 +1460,29 @@
     if (insidePeer) return;
 
     const serial = miningSequence++;
-    const connected = net && net.mode === "online" && hasJoined && myId;
-    if (connected) {
+    const mode = net && net.mode;
+    if (net && mode === "online" && hasJoined && myId) {
       // Optimiste : posé tout de suite, retiré si le serveur refuse.
       if (!mining.spendBlock(type)) return;
       const placedNow = mining.placeBlock(column, row, type);
       pendingPlacements.set(serial, { column, row, type });
       net.placeBlock(column, row, type, serial);
       if (placedNow) placementFeedback(placedNow);
+      updateHotbar();
+      return;
+    }
+    if (net && mode === "p2p" && hasJoined && myId) {
+      // En direct : posé tout de suite (la règle « collé à un bloc » est déjà
+      // vérifiée localement), puis annoncé aux pairs. Pas d'arbitre : pas de
+      // refus à attendre.
+      if (!mining.spendBlock(type)) return;
+      const placedNow = mining.placeBlock(column, row, type);
+      if (!placedNow) {
+        mining.refundBlock(type);
+        return;
+      }
+      net.placeBlock(column, row, type, serial);
+      placementFeedback(placedNow);
       updateHotbar();
       return;
     }
@@ -1477,10 +1532,17 @@
 
         const playerRect = { x: player.x, y: player.y, width: player.width, height: player.height };
         mining.collectTouchedLocalDrops(playerRect, groundY).forEach(awardMinedDrop);
-        if (net && net.mode === "online" && hasJoined && myId) {
+        const mode = net && net.mode;
+        if (net && (mode === "online" || mode === "p2p") && hasJoined && myId) {
           mining.findTouchedDrops(playerRect, groundY).forEach((drop) => {
             if (!drop.networked || !mining.markDropPending(drop.id)) return;
             net.pickupDrop(drop.id);
+            if (mode === "p2p") {
+              // En direct, pas de serveur pour confirmer : on collecte tout de
+              // suite, et l'annonce retirera le drop chez les pairs.
+              const item = mining.collectDrop(drop.id);
+              if (item) awardMinedDrop(item);
+            }
           });
         }
       } else {

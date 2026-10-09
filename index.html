@@ -409,6 +409,11 @@
         content: "";
       }
 
+      .players[data-mode="p2p"] .players-mode::before {
+        background: #7ec8ff;
+        box-shadow: 0 0 0 3px rgb(126 200 255 / 18%);
+      }
+
       .players[data-mode="local"] .players-mode::before {
         background: #ffbf67;
         box-shadow: 0 0 0 3px rgb(255 191 103 / 18%);
@@ -775,7 +780,8 @@
                 <button class="menu-server-copy" id="menu-server-copy" type="button" title="Copier l'adresse à envoyer">Copier</button>
               </div>
               <p class="menu-server-hint" id="menu-server-hint">
-                Une seule arène, sans IP ni réglage à saisir.
+                Une seule arène, sans IP ni réglage à saisir : ça marche aussi
+                depuis un autre Wi-Fi ou une autre ville.
               </p>
             </div>
 
@@ -793,6 +799,7 @@
       </section>
     </main>
 
+    <script type="module" src="src/p2p.js"></script>
     <script src="src/net.js"></script>
     <script src="src/characters.js"></script>
     <script src="src/sfx-library.js"></script>

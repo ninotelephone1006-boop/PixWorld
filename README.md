@@ -4,16 +4,49 @@ Jeu de plateforme 2D en HTML Canvas, **jouable à plusieurs dans le navigateur**
 
 ## Jouer ensemble par le lien
 
-Ouvre le **lien public du jeu**, choisis ton héros et entre dans l’arène.
-Tous les joueurs de ce site se retrouvent automatiquement : autres PC, autres
+Ouvre le **lien du jeu**, choisis ton héros et entre dans l’arène.
+Tous les joueurs de ce lien se retrouvent automatiquement : autres PC, autres
 Wi-Fi, autres villes. Le bouton **Copier** partage ce même lien. Aucun champ IP,
 aucun choix de serveur, aucun repli trompeur limité aux onglets.
 
-### Mise en ligne (une fois, par le propriétaire du site)
+Deux transports, une seule arène, choisis automatiquement :
 
-Un serveur public est indispensable, mais les joueurs n’ont rien à configurer.
-GitHub Pages et les autres hébergements purement statiques ne peuvent pas faire
-tourner ce serveur WebSocket.
+1. **Le serveur WebSocket du site** quand il existe (`npm start`, Render…) :
+   le serveur relaie les états, tous les réseaux passent sans difficulté.
+2. **Le direct entre joueurs (WebRTC)** sinon — par exemple si le jeu est
+   hébergé sur GitHub Pages ou tout hébergement statique. Les joueurs ouvrent
+   le même lien et échangent en direct, même depuis des réseaux différents.
+   La mise en relation utilise les traceurs WebTorrent publics (signalisation
+   uniquement) ; les données de jeu vont ensuite de pair à pair, chiffrées
+   par WebRTC. Aucun serveur de jeu n’est nécessaire.
+
+En direct, tout se synchronise de pair à pair : positions, attaques, vie,
+minage, pose de blocs et drops. Un nouveau venu reçoit l’état complet du
+terrain (blocs cassés, blocs posés, drops au sol) des joueurs déjà là.
+
+Tant qu’aucun pair n’est trouvé en direct, le jeu continue d’essayer le
+serveur du site et migre vers lui s’il finit par répondre (par exemple pendant
+un démarrage lent de l’hébergement). Dès qu’un pair est là, l’arène directe
+reste en place pour ne jamais la séparer en deux.
+
+Pour une **salle privée**, ajoute `?room=nom` au lien : seuls ceux qui ouvrent
+ce lien-là se retrouvent.
+
+### Limites du direct entre joueurs
+
+- Derrière certains réseaux très stricts (NAT symétrique, pare-feu d’entreprise),
+  le direct peut échouer : sans serveur TURN configuré, ces joueurs ne se
+  voient pas. Un hébergement avec le serveur WebSocket résout tous les cas.
+- Les traceurs publics servent uniquement à se trouver ; s’ils sont
+  injoignables (réseau très filtré), la bascule en direct ne peut pas aboutir.
+- En direct, il n’y a pas d’arbitre central : si deux joueurs cassent le même
+  bloc au même moment, chacun applique les événements reçus (un bloc déjà
+  cassé reste sans effet), comme un refus du serveur.
+
+### Mise en ligne (facultative, par le propriétaire du site)
+
+Le multijoueur fonctionne **déjà** sans serveur de jeu (mode direct). Ajouter
+un serveur public améliore la fiabilité sur tous les réseaux :
 
 1. Dans Render, créer un **Blueprint** depuis ce dépôt et utiliser `render.yaml`.
 2. Valider le service Node (le plan `starter` indiqué est payant et évite la mise
@@ -40,7 +73,8 @@ npm start
 npm test
 ```
 
-Un lien localhost ou privé n’est pas accessible depuis une autre ville.
+Un lien localhost ou privé n’est accessible que de ton réseau ; pour jouer
+avec quelqu’un d’ailleurs, partage un lien hébergé sur Internet.
 
 ## Écran titre et héros
 
@@ -137,10 +171,13 @@ La liste des événements et de leurs variantes est décrite dans `src/sfx-libra
 
 ### Connexion automatique
 
-Le statut indique connexion, en ligne, reconnexion, arène pleine ou hors ligne.
-Les tentatives reprennent automatiquement, même si le service était indisponible
-à l’ouverture. Une coupure retire les anciens joueurs de l’écran. Aucun autre
-transport ne crée une arène séparée en silence.
+Le statut indique connexion, en ligne, en ligne (direct), reconnexion, arène
+pleine ou hors ligne. Le jeu tente d’abord le serveur WebSocket du site, puis
+bascule automatiquement en direct entre joueurs quand ce serveur n’est pas
+joignable. Les tentatives reprennent automatiquement, même si le réseau était
+indisponible à l’ouverture. Une coupure retire les anciens joueurs de l’écran.
+Aucun transport ne crée d’arène séparée en silence : le mode affiché décrit
+toujours l’arène dans laquelle tu joues.
 
 Le combat actuel reste simulé côté client : les attaques, la vie et les K.O.
 sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-triche.
@@ -172,7 +209,9 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `src/audio.js` — lecture des effets sonores : banque de fichiers, pas d'herbe échantillonnés, froissement de l'herbe synthétisé, autres matières synthétisées en secours, spatialisation, volume et sourdine.
 - `src/sfx-library.js` — catalogue généré des sons (événement → variantes, sources d'origine et gain), écrit par `tools/build-sfx.mjs`.
 - `assets/sfx/` — les 199 Wave adaptés (CC0), 3 à 8 variantes par événement.
-- `src/net.js` — WebSocket sur la même origine et reconnexion automatique.
+- `src/net.js` — WebSocket sur la même origine, bascule automatique en direct entre joueurs et reconnexion.
+- `src/p2p.js` — transport direct (WebRTC) : s’enregistre pour `src/net.js`, rejoint la salle du lien.
+- `src/vendor/trystero/` — librairie Trystero (MIT, `@trystero-p2p/core` + `@trystero-p2p/torrent` v0.26.0) vendue pour la mise en relation pair à pair ; voir `src/vendor/trystero/README.md`.
 - `tools/make-sprites.py` — générateur (Pillow) des feuilles de sprites originales de Sora et Raiden.
 - `tools/build-sfx.mjs` — récupère les sons CC0 sur GitHub, les adapte (mono, 44,1 kHz, silences coupés, 0,8 s max) et régénère `assets/sfx/` + `src/sfx-library.js`.
 - `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz et synchronise les blocs minés / les drops dans l'arène (état en mémoire). Il écoute sur toutes les interfaces et fournit `/healthz` pour le déploiement.
@@ -187,7 +226,7 @@ npm test
 
 Le démarrage complet de la page est rejoué sans navigateur (`test/game-boot.test.js`) : chargement des scripts, quatre héros affichés, connexion à l'arène, entrée en jeu et arrivée d'un autre joueur — de quoi repérer immédiatement un script qui planterait au chargement.
 
-Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, inventaire et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage des drops (`test/net.test.js`, `test/server.test.js`).
+Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, inventaire, état partagé et instantané du terrain (`test/mining.test.js`) — ainsi que le réseau : connexion serveur, reconnexion, arène pleine, bascule en direct entre joueurs, minage et pose de blocs relayés de pair à pair, état du terrain partagé, migration vers le serveur et priorité au direct (`test/net.test.js`), le module direct et sa librairie vendue (`test/p2p.test.js`), puis deux vrais clients WebSocket contre le serveur (`test/server.test.js`).
 
 ## Sprites et décor
 

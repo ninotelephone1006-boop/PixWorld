@@ -31,6 +31,15 @@ async function until(client, predicate) {
   assert.equal((await fetch(base + "/")).status, 200);
   assert.equal((await fetch(base + "/.git/HEAD")).status, 404);
   assert.equal((await fetch(base + "/server/server.js")).status, 404);
+  // Le transport direct (WebRTC) et sa librairie vendue sont servis au client,
+  // avec un type MIME accepté pour les modules ES.
+  const p2pResponse = await fetch(base + "/src/p2p.js");
+  assert.equal(p2pResponse.status, 200);
+  assert.match(p2pResponse.headers.get("content-type") || "", /javascript/);
+  const trysteroResponse = await fetch(base + "/src/vendor/trystero/torrent.js");
+  assert.equal(trysteroResponse.status, 200);
+  assert.match(trysteroResponse.headers.get("content-type") || "", /javascript/);
+  assert.equal((await fetch(base + "/src/vendor/trystero/core/index.js")).status, 200);
   const a = connect(), b = connect();
   const aw = await until(a, (m) => m.t === "welcome");
   const bw = await until(b, (m) => m.t === "welcome");

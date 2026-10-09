@@ -1,13 +1,13 @@
 {
   "name": "pixworld",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "description": "Prototype de jeu de plateforme 2D multijoueur en HTML Canvas",
   "scripts": {
     "start": "node server/server.js",
     "dev": "node server/server.js",
     "build:sfx": "node tools/build-sfx.mjs",
-    "test": "node test/game-boot.test.js && node test/characters.test.js && node test/audio.test.js && node test/sfx-bank.test.js && node test/effects.test.js && node test/net.test.js && node test/grass.test.js && node test/mining.test.js && node test/world.test.js && node test/scenery.test.js && node test/gameplay.test.js && node test/server.test.js"
+    "test": "node test/game-boot.test.js && node test/characters.test.js && node test/audio.test.js && node test/sfx-bank.test.js && node test/effects.test.js && node test/net.test.js && node test/p2p.test.js && node test/grass.test.js && node test/mining.test.js && node test/world.test.js && node test/scenery.test.js && node test/gameplay.test.js && node test/server.test.js"
   },
   "engines": {
     "node": ">=18"
