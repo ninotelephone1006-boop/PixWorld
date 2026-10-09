@@ -22,6 +22,11 @@ window.PixWorldNet = (() => {
   const WS_OPEN_TIMEOUT = 4000; // au-delà, on bascule sur le mode local
   const STATE_INTERVAL = 50; // 20 envois de position par seconde
   const PEER_TIMEOUT = 6000; // un onglet muet si longtemps est considéré parti
+  const CHARACTER_IDS = new Set(["ninja", "archer", "samurai", "mage"]);
+
+  function cleanCharacter(raw) {
+    return CHARACTER_IDS.has(raw) ? raw : "ninja";
+  }
 
   function randomId() {
     return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -33,7 +38,11 @@ window.PixWorldNet = (() => {
    */
   function connect(options) {
     const emit = options.onEvent;
-    const identity = { name: options.name, color: options.color };
+    const identity = {
+      name: options.name,
+      color: options.color,
+      character: cleanCharacter(options.character),
+    };
     const selfId = randomId();
 
     let mode = "solo";
@@ -62,7 +71,12 @@ window.PixWorldNet = (() => {
     function localSnapshot() {
       const list = [];
       peers.forEach((peer) => {
-        list.push(Object.assign({ id: peer.id }, peer.state));
+        list.push(Object.assign({
+          id: peer.id,
+          name: peer.name,
+          color: peer.color,
+          character: peer.character,
+        }, peer.state));
       });
       if (list.length) emit({ t: "snapshot", p: list });
     }
@@ -92,20 +106,39 @@ window.PixWorldNet = (() => {
 
       if (message.t === "hello") {
         const known = peers.has(message.from);
-        const player = { id: message.from, name: message.name, color: message.color };
+        const player = {
+          id: message.from,
+          name: message.name,
+          color: message.color,
+          character: cleanCharacter(message.character),
+        };
         if (!known) {
-          peers.set(message.from, { id: message.from, name: player.name, color: player.color, state: {}, seen: Date.now() });
+          peers.set(message.from, {
+            id: message.from,
+            name: player.name,
+            color: player.color,
+            character: player.character,
+            state: {},
+            seen: Date.now(),
+          });
           emit({ t: "join", player });
           if (options.onCount) options.onCount(peers.size + 1);
         } else {
           const peer = peers.get(message.from);
           peer.name = player.name;
           peer.color = player.color;
+          peer.character = player.character;
           peer.seen = Date.now();
         }
         // On se présente en retour, sans relancer de boucle de réponses.
         if (!message.reply) {
-          broadcast({ t: "hello", name: identity.name, color: identity.color, reply: true });
+          broadcast({
+            t: "hello",
+            name: identity.name,
+            color: identity.color,
+            character: identity.character,
+            reply: true,
+          });
         }
         return;
       }
@@ -120,8 +153,18 @@ window.PixWorldNet = (() => {
         if (peer) {
           peer.name = message.name;
           peer.color = message.color;
+          peer.character = cleanCharacter(message.character);
           peer.seen = Date.now();
-          emit({ t: "renamed", id: message.from, player: { id: message.from, name: message.name, color: message.color } });
+          emit({
+            t: "renamed",
+            id: message.from,
+            player: {
+              id: message.from,
+              name: message.name,
+              color: message.color,
+              character: peer.character,
+            },
+          });
         }
         return;
       }
@@ -130,12 +173,26 @@ window.PixWorldNet = (() => {
         let peer = peers.get(message.from);
         if (!peer) {
           // Un onglet dont on a raté le "hello" : on lui demande de se présenter.
-          peer = { id: message.from, name: "Ninja", color: "#ffffff", state: {}, seen: Date.now() };
+          peer = {
+            id: message.from,
+            name: "Ninja",
+            color: "#ffffff",
+            character: cleanCharacter(message.c),
+            state: {},
+            seen: Date.now(),
+          };
           peers.set(message.from, peer);
-          broadcast({ t: "hello", name: identity.name, color: identity.color, reply: true });
+          broadcast({
+            t: "hello",
+            name: identity.name,
+            color: identity.color,
+            character: identity.character,
+            reply: true,
+          });
           if (options.onCount) options.onCount(peers.size + 1);
         }
         peer.seen = Date.now();
+        peer.character = cleanCharacter(message.c || peer.character);
         peer.state = {
           x: message.x,
           gap: message.gap,
@@ -144,6 +201,8 @@ window.PixWorldNet = (() => {
           g: message.g,
           vy: message.vy,
           a: message.a,
+          c: peer.character,
+          n: message.n,
         };
       }
     }
@@ -152,9 +211,19 @@ window.PixWorldNet = (() => {
     function sendHelloIfPossible() {
       if (!wantsHello || closed) return;
       if (mode === "online" && socket && socket.readyState === 1) {
-        socket.send(JSON.stringify({ t: "hello", name: identity.name, color: identity.color }));
+        socket.send(JSON.stringify({
+          t: "hello",
+          name: identity.name,
+          color: identity.color,
+          character: identity.character,
+        }));
       } else if (mode === "local") {
-        broadcast({ t: "hello", name: identity.name, color: identity.color });
+        broadcast({
+          t: "hello",
+          name: identity.name,
+          color: identity.color,
+          character: identity.character,
+        });
       }
     }
 
@@ -288,9 +357,10 @@ window.PixWorldNet = (() => {
        * Rejoint la partie : c'est ici que le pseudo devient visible par les
        * autres joueurs (appelé quand on valide l'écran de pseudo).
        */
-      join(name, color) {
+      join(name, color, character) {
         if (name !== undefined) identity.name = name;
         if (color !== undefined) identity.color = color;
+        if (character !== undefined) identity.character = cleanCharacter(character);
         wantsHello = true;
         sendHelloIfPossible();
       },
@@ -304,14 +374,15 @@ window.PixWorldNet = (() => {
         }
       },
       /** Change de pseudo / couleur sans quitter la partie. */
-      rename(name, color) {
+      rename(name, color, character) {
         identity.name = name;
         identity.color = color;
+        if (character !== undefined) identity.character = cleanCharacter(character);
         if (!wantsHello) return; // pas encore en jeu : le "hello" suffira
         if (mode === "online" && socket && socket.readyState === 1) {
-          socket.send(JSON.stringify({ t: "rename", name, color }));
+          socket.send(JSON.stringify({ t: "rename", name, color, character: identity.character }));
         } else if (mode === "local") {
-          broadcast({ t: "renamed", name, color });
+          broadcast({ t: "renamed", name, color, character: identity.character });
         }
       },
       close() {

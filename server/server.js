@@ -25,6 +25,7 @@ const MAX_MESSAGE_BYTES = 4096;
 const MAX_MESSAGES_PER_SECOND = 80;
 const IDLE_TIMEOUT_MS = 20000;
 const WORLD_WIDTH = 2600;
+const CHARACTER_IDS = new Set(["ninja", "archer", "samurai", "mage"]);
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -108,6 +109,10 @@ function cleanColor(raw) {
   return /^#[0-9a-fA-F]{6}$/.test(String(raw)) ? String(raw) : "#ff8a5c";
 }
 
+function cleanCharacter(raw) {
+  return CHARACTER_IDS.has(raw) ? raw : "ninja";
+}
+
 function send(socket, message) {
   if (socket.destroyed || !socket.writable) return;
   try {
@@ -172,18 +177,21 @@ function registerPlayer(socket) {
     id,
     name: "Ninja",
     color: "#ff8a5c",
+    character: "ninja",
     socket,
     lastSeen: Date.now(),
     joined: false, // devient vrai à la réception du "hello" (pseudo choisi)
     messages: 0,
     windowStart: Date.now(),
-    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0 },
+    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0 },
   };
   players.set(id, player);
 
   const roster = [];
   players.forEach((other) => {
-    if (other.id !== id && other.joined) roster.push({ id: other.id, name: other.name, color: other.color });
+    if (other.id !== id && other.joined) {
+      roster.push({ id: other.id, name: other.name, color: other.color, character: other.character });
+    }
   });
   send(socket, { t: "welcome", id, players: roster });
   console.log("+ " + id + " connecté (" + players.size + " joueur(s))");
@@ -227,7 +235,8 @@ function handleMessage(player, message) {
   if (message.t === "hello" || message.t === "rename") {
     player.name = cleanName(message.name);
     player.color = cleanColor(message.color);
-    const info = { id: player.id, name: player.name, color: player.color };
+    player.character = cleanCharacter(message.character);
+    const info = { id: player.id, name: player.name, color: player.color, character: player.character };
     if (message.t === "hello") {
       player.joined = true;
       broadcast({ t: "join", player: info }, player.id);
@@ -246,6 +255,8 @@ function handleMessage(player, message) {
       vy: Math.round(clampNumber(message.vy, -4000, 4000, 0)),
       g: Boolean(message.g),
       a: clampNumber(message.a, 0, 1, 0),
+      c: cleanCharacter(message.c || player.character),
+      n: Math.floor(clampNumber(message.n, 0, 2147483647, player.state.n || 0)),
     };
   }
 }
@@ -264,7 +275,14 @@ setInterval(() => {
       return;
     }
     // Tant que le pseudo n'est pas choisi, le joueur reste invisible.
-    if (player.joined) snapshot.push(Object.assign({ id: player.id }, player.state));
+    if (player.joined) {
+      snapshot.push(Object.assign({
+        id: player.id,
+        name: player.name,
+        color: player.color,
+        character: player.character,
+      }, player.state));
+    }
   });
 
   stale.forEach((id) => {
