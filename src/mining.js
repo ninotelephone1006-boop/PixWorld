@@ -394,29 +394,34 @@ window.PixWorldMining = (() => {
     function updateDrops(delta, baseY) {
       const dt = clamp(Number(delta) || 0, 0, 0.05);
       const base = Number(baseY) || 0;
+      const half = DROP_SIZE / 2;
       drops.forEach((drop, id) => {
-        const previousDepth = drop.depth;
         drop.age += dt;
         drop.phase += dt * 3.4;
-        drop.x = clamp(drop.x + drop.vx * dt, 0, worldWidth - 1);
         drop.vx *= Math.exp(-1.8 * dt);
-        drop.depth += drop.vy * dt;
-        drop.vy += DROP_GRAVITY * dt;
-
-        // Les petits cubes rebondissent sur la première surface solide atteinte.
-        // `surface` est exprimée en repère monde (incluant `baseY`) ; on la compare
-        // au fond du cube (`base + drop.depth + DROP_SIZE/2`) pour rester cohérent
-        // avec la position de rendu (`base + drop.depth`).
-        const surfaceWorld = surfaceAt(drop.x, base);
-        const previousBottom = base + previousDepth + DROP_SIZE / 2;
-        const nextBottom = base + drop.depth + DROP_SIZE / 2;
-        if (surfaceWorld !== null && drop.vy > 0 && previousBottom <= surfaceWorld && nextBottom >= surfaceWorld) {
-          drop.depth = surfaceWorld - base - DROP_SIZE / 2;
+        // Le cube est un petit corps solide : on réutilise la résolution de
+        // collision des joueurs (pas à pas, axe par axe). Il ne peut ainsi
+        // traverser aucun bloc — ni en naissant sous une plateforme posée,
+        // ni en dérivant contre un mur, ni en tombant à grande vitesse.
+        const moved = moveEntity(
+          { x: drop.x - half, y: base + drop.depth - half, width: DROP_SIZE, height: DROP_SIZE },
+          drop.vx * dt,
+          drop.vy * dt,
+          base
+        );
+        drop.x = clamp(moved.x + half, 0, worldWidth - 1);
+        drop.depth = moved.y + half - base;
+        if (moved.hitWall) drop.vx = 0;
+        if (moved.grounded) {
           drop.vy = Math.abs(drop.vy) > 28 ? -Math.abs(drop.vy) * 0.16 : 0;
+        } else if (moved.hitCeiling) {
+          drop.vy = Math.abs(drop.vy) > 28 ? Math.abs(drop.vy) * 0.16 : 0;
         }
+        drop.vy += DROP_GRAVITY * dt;
+        // Sécurité : le plancher du monde (sous la roche mère) arrête tout.
         const worldBottom = base + LAYER_TYPES.length * blockSize;
-        if (base + drop.depth + DROP_SIZE / 2 > worldBottom) {
-          drop.depth = worldBottom - base - DROP_SIZE / 2;
+        if (base + drop.depth + half > worldBottom) {
+          drop.depth = worldBottom - base - half;
           drop.vy = Math.abs(drop.vy) > 28 ? -Math.abs(drop.vy) * 0.16 : 0;
         }
         if (drop.age > 45) drops.delete(id);
