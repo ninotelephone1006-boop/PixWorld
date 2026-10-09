@@ -12,7 +12,7 @@ vm.runInContext(source, sandbox);
 
 const Mining = sandbox.window.PixWorldMining;
 assert(Mining && typeof Mining.create === "function", "Le module de minage est chargé");
-assert.equal(Mining.constants.MINE_TIME, 2, "Deux secondes de maintien sont requises");
+assert.equal(Mining.constants.MINE_TIME, 0.2, "0,2 seconde de maintien suffit à casser un bloc");
 assert.equal(Mining.constants.ROWS, 15, "Le terrain contient quinze couches");
 assert.equal(Mining.constants.LAYER_TYPES[0], "grass", "Une couche d'herbe en surface");
 assert.equal(Array.from(Mining.constants.LAYER_TYPES.slice(1, 5)).join(","), "dirt,dirt,dirt,dirt", "Quatre couches de terre");

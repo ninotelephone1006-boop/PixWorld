@@ -15,8 +15,8 @@
 window.PixWorldMining = (() => {
   "use strict";
 
-  const BLOCK_SIZE = 32;
-  const MINE_TIME = 2;
+  const BLOCK_SIZE = 48;
+  const MINE_TIME = 0.2;
   const DROP_SIZE = 14;
   const DROP_GRAVITY = 250;
   // Rangée la plus haute où l'on peut poser un bloc (au-dessus de la surface).
@@ -391,8 +391,9 @@ window.PixWorldMining = (() => {
       drops.forEach((drop) => { drop.pending = false; });
     }
 
-    function updateDrops(delta) {
+    function updateDrops(delta, baseY) {
       const dt = clamp(Number(delta) || 0, 0, 0.05);
+      const base = Number(baseY) || 0;
       drops.forEach((drop, id) => {
         const previousDepth = drop.depth;
         drop.age += dt;
@@ -403,16 +404,19 @@ window.PixWorldMining = (() => {
         drop.vy += DROP_GRAVITY * dt;
 
         // Les petits cubes rebondissent sur la première surface solide atteinte.
-        const surface = surfaceAt(drop.x, 0);
-        const previousBottom = previousDepth + DROP_SIZE / 2;
-        const nextBottom = drop.depth + DROP_SIZE / 2;
-        if (surface !== null && drop.vy > 0 && previousBottom <= surface && nextBottom >= surface) {
-          drop.depth = surface - DROP_SIZE / 2;
+        // `surface` est exprimée en repère monde (incluant `baseY`) ; on la compare
+        // au fond du cube (`base + drop.depth + DROP_SIZE/2`) pour rester cohérent
+        // avec la position de rendu (`base + drop.depth`).
+        const surfaceWorld = surfaceAt(drop.x, base);
+        const previousBottom = base + previousDepth + DROP_SIZE / 2;
+        const nextBottom = base + drop.depth + DROP_SIZE / 2;
+        if (surfaceWorld !== null && drop.vy > 0 && previousBottom <= surfaceWorld && nextBottom >= surfaceWorld) {
+          drop.depth = surfaceWorld - base - DROP_SIZE / 2;
           drop.vy = Math.abs(drop.vy) > 28 ? -Math.abs(drop.vy) * 0.16 : 0;
         }
-        const worldBottom = LAYER_TYPES.length * blockSize;
-        if (drop.depth + DROP_SIZE / 2 > worldBottom) {
-          drop.depth = worldBottom - DROP_SIZE / 2;
+        const worldBottom = base + LAYER_TYPES.length * blockSize;
+        if (base + drop.depth + DROP_SIZE / 2 > worldBottom) {
+          drop.depth = worldBottom - base - DROP_SIZE / 2;
           drop.vy = Math.abs(drop.vy) > 28 ? -Math.abs(drop.vy) * 0.16 : 0;
         }
         if (drop.age > 45) drops.delete(id);
