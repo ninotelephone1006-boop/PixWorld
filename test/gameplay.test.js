@@ -59,16 +59,16 @@ function holdMine(x, y, frames) {
 }
 
 // 1. Surface : deux rangées visibles, caméra verticale au repos.
-assert.equal(dbg.groundY, 720 - 64, "La surface est à deux blocs du bas de l'écran");
+assert.equal(dbg.groundY, 720 - 96, "La surface est à deux blocs du bas de l'écran");
 assert.equal(dbg.camY, 0, "En surface, la caméra verticale est au repos");
 assert.equal(dbg.player.grounded, true);
 
 // 2. On mine sous ses pieds, couche par couche, jusqu'au fond du monde.
 // Le joueur chevauche deux colonnes : on creuse les deux pour qu'il descende.
 for (let row = 0; row < 14; row++) {
-  holdMine(133, 672, 132); // 2,1 s de maintien : le bloc sous le curseur casse
-  holdMine(112, 672, 132); // seconde colonne sous les pieds
-  browser.runFrames(40);   // chute d'une couche + la caméra suit
+  holdMine(168, 648, 14); // ~0,23 s de maintien : le bloc sous le curseur casse (colonne 3)
+  holdMine(120, 648, 14); // seconde colonne sous les pieds (colonne 2)
+  browser.runFrames(40);  // chute d'une couche + la caméra suit
 }
 const collected = dbg.inventory();
 assert.ok(
@@ -77,14 +77,14 @@ assert.ok(
 );
 assert.equal(dbg.player.grounded, true, "Au fond, le joueur est posé, pas dans le vide");
 assert.ok(
-  dbg.player.y + 60 <= dbg.groundY + 480 + 1,
+  dbg.player.y + 60 <= dbg.groundY + 720 + 1,
   "La chute s'arrête sur la roche mère (pieds à " + (dbg.player.y + 60) + ")",
 );
-assert.ok(dbg.camY > 400, "La caméra est descendue avec le joueur (" + dbg.camY + ")");
+assert.ok(dbg.camY > 500, "La caméra est descendue avec le joueur (" + dbg.camY + ")");
 
 // 3. La roche mère ne casse pas, même en insistant.
 const stoneBefore = dbg.inventory().stone;
-holdMine(133, 672, 140);
+holdMine(168, 648, 18);
 assert.equal(dbg.inventory().stone, stoneBefore, "La roche mère ne donne rien");
 assert.equal(dbg.player.grounded, true);
 
@@ -92,23 +92,23 @@ assert.equal(dbg.player.grounded, true);
 fire("keydown", { code: "KeyD", key: "d", repeat: false });
 browser.runFrames(90);
 fire("keyup", { code: "KeyD", key: "d" });
-assert.ok(dbg.player.x <= 118.5, "La paroi bloque l'avancée (x = " + dbg.player.x + ")");
+assert.ok(dbg.player.x <= 150.5, "La paroi bloque l'avancée (x = " + dbg.player.x + ")");
 assert.ok(dbg.player.x >= 111, "Le joueur n'a pas été aspiré dans le mur");
 
 // 5. Clic droit : poser un bloc contre la paroi (colonne 3, rangée 11),
 //    hors du corps du joueur.
 fire("keydown", { code: "Digit2", key: "2", repeat: false }); // terre sélectionnée
 const dirtBefore = dbg.inventory().dirt;
-fire("pointerdown", { button: 2, clientX: 112, clientY: 576 });
+fire("pointerdown", { button: 2, clientX: 168, clientY: 456 });
 assert.equal(dbg.placed().length, 1, "Un bloc est posé contre la paroi");
 assert.equal(dbg.inventory().dirt, dirtBefore - 1, "Le bloc posé sort de l'inventaire");
 
 // En plein air, plus haut, la pose est refusée.
-fire("pointerdown", { button: 2, clientX: 112, clientY: 200 });
+fire("pointerdown", { button: 2, clientX: 168, clientY: 200 });
 assert.equal(dbg.placed().length, 1, "Pas de bloc posé en plein air");
 
 // Casser le bloc posé : il disparaît, rien d'autre ne bouge.
-holdMine(112, 576, 132);
+holdMine(168, 456, 14);
 assert.equal(dbg.placed().length, 0, "Le bloc posé se casse");
 assert.equal(dbg.player.grounded, true, "Le joueur n'a pas bougé pendant ce temps");
 

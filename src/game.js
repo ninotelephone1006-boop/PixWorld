@@ -1456,7 +1456,7 @@
 
   function updateMining(delta) {
     if (playing) {
-      mining.updateDrops(delta);
+      mining.updateDrops(delta, groundY);
       if (player.deadTime === 0) {
         const target = currentMiningTarget();
         if (miningPointer.down && target) {
