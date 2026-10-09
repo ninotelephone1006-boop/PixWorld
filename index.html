@@ -564,6 +564,36 @@
               </div>
             </div>
 
+            <div class="menu-divider" aria-hidden="true"></div>
+
+            <div class="menu-field menu-server">
+              <label class="menu-label" for="menu-server-input">
+                Rejoindre une partie · adresse de l'autre PC
+              </label>
+              <div class="menu-server-row">
+                <input
+                  class="menu-server-input"
+                  id="menu-server-input"
+                  name="server"
+                  type="text"
+                  placeholder="Ce PC (par défaut)"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+                <button class="menu-server-apply" id="menu-server-apply" type="button" title="Se connecter à ce serveur">
+                  Rejoindre
+                </button>
+              </div>
+              <div class="menu-server-share" id="menu-server-share" hidden>
+                <code class="menu-server-address" id="menu-server-address"></code>
+                <button class="menu-server-copy" id="menu-server-copy" type="button" title="Copier l'adresse à envoyer">Copier</button>
+              </div>
+              <p class="menu-server-hint" id="menu-server-hint">
+                Laisse vide pour jouer sur ce PC. Sur l'autre machine, ouvre cette page et entre l'adresse du serveur
+                (par exemple <code>192.168.1.24:3000</code>).
+              </p>
+            </div>
+
             <div class="menu-actions">
               <button class="menu-primary" id="menu-play" type="submit">
                 <span id="menu-play-label">Entrer dans l'arène</span>

@@ -63,6 +63,8 @@ function makeBrowser(options) {
     JSON,
     Math,
     Date,
+    navigator: {},
+    localStorage: options.storage || createStorage(),
     setTimeout: (fn, ms) => {
       const id = setTimeout(fn, ms);
       timers.push(id);
@@ -75,7 +77,7 @@ function makeBrowser(options) {
       return id;
     },
     clearInterval: (id) => clearInterval(id),
-    location: { protocol: "http:", host: "localhost:3000" },
+    location: { protocol: "http:", host: "localhost:3000", search: "" },
     WebSocket: options.noServer ? undefined : FakeWebSocket,
     BroadcastChannel: options.channelClass,
   };
@@ -86,6 +88,17 @@ function makeBrowser(options) {
   vm.runInContext(NET_SOURCE, sandbox);
 
   return { sandbox, sockets, timers };
+}
+
+/** Faux localStorage, pour rejouer la mémorisation de l'adresse. */
+function createStorage(initial) {
+  const values = new Map(Object.entries(initial || {}));
+  return {
+    getItem: (key) => (values.has(key) ? values.get(key) : null),
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: (key) => values.delete(key),
+    values,
+  };
 }
 
 /** Faux BroadcastChannel partagé entre plusieurs « onglets » du test. */
@@ -227,11 +240,99 @@ async function testLocalTabs() {
   netB.close();
 }
 
+/**
+ * Rejoindre la partie depuis un autre PC : l'adresse du serveur peut être
+ * saisie dans le menu, passée en paramètre d'URL ou mémorisée.
+ */
+async function testServerAddress() {
+  console.log("Adresse du serveur à rejoindre");
+  const browser = makeBrowser();
+  const api = browser.sandbox.PixWorldNet;
+
+  const at = (raw, loc) => {
+    browser.sandbox.location = loc || { protocol: "http:", host: "localhost:3000", search: "" };
+    return api.resolveServerUrl(raw);
+  };
+
+  check("sans adresse, on vise le serveur de la page", at().url === "ws://localhost:3000/ws", at().url);
+
+  // Tous les formats acceptés, pour coller à ce qu'un joueur peut taper.
+  const formats = [
+    ["192.168.1.24", "ws://192.168.1.24:3000/ws"],
+    ["192.168.1.24:8080", "ws://192.168.1.24:8080/ws"],
+    ["http://192.168.1.24:8080", "ws://192.168.1.24:8080/ws"],
+    ["http://192.168.1.24/", "ws://192.168.1.24:3000/ws"],
+    ["ws://10.0.0.7:4000/ws", "ws://10.0.0.7:4000/ws"],
+    ["wss://pixworld.example:443/ws", "wss://pixworld.example:443/ws"],
+    ["  192.168.1.24:3000  ", "ws://192.168.1.24:3000/ws"],
+  ];
+  formats.forEach(([input, expected]) => {
+    check("« " + input + " » devient " + expected, at(input).url === expected, at(input).url);
+  });
+
+  check("l'adresse à partager est en http", at("192.168.1.24").httpUrl === "http://192.168.1.24:3000", at("192.168.1.24").httpUrl);
+  check("l'adresse saisie est signalée comme distante", at("192.168.1.24").remote === true);
+  check("le serveur de la page n'est pas distant", at().remote === false);
+
+  // Page servie en https : on chiffre, sauf vers le réseau local.
+  const secure = { protocol: "https:", host: "jeu.example", search: "" };
+  check("page https, adresse publique → wss", at("pixworld.example:3000", secure).url === "wss://pixworld.example:3000/ws", at("pixworld.example:3000", secure).url);
+  check("page https, PC du salon → ws", at("192.168.1.24", secure).url === "ws://192.168.1.24:3000/ws");
+  check("le contenu mixte est détecté", at("192.168.1.24", secure).mixedContent === true);
+  check("vers localhost, pas de blocage", at("localhost:3000", secure).mixedContent === false);
+  check("page https par défaut → wss", at(null, secure).url === "wss://jeu.example/ws", at(null, secure).url);
+
+  // Page ouverte en file:// : rien à deviner, sauf si une adresse est donnée.
+  const file = { protocol: "file:", host: "", search: "" };
+  check("fichier local sans adresse : aucun serveur", at(null, file) === null);
+  check("fichier local avec adresse : on l'utilise", at("192.168.1.24", file).url === "ws://192.168.1.24:3000/ws");
+
+  // Lien tout prêt : ?server=192.168.1.24:3000
+  const invited = { protocol: "http:", host: "localhost:3000", search: "?server=10.0.0.5%3A3000" };
+  check("le paramètre ?server= est utilisé", at(null, invited).url === "ws://10.0.0.5:3000/ws", at(null, invited).url);
+
+  // Adresse mémorisée lors d'une partie précédente.
+  const remembered = makeBrowser({ storage: createStorage({ "pixworld.server": "192.168.1.9:3000" }) });
+  check(
+    "l'adresse mémorisée est réutilisée",
+    remembered.sandbox.PixWorldNet.resolveServerUrl().url === "ws://192.168.1.9:3000/ws",
+    remembered.sandbox.PixWorldNet.resolveServerUrl().url,
+  );
+}
+
+async function testJoinOtherComputer() {
+  console.log("Changer de serveur en cours de partie");
+  const storage = createStorage();
+  const browser = makeBrowser({ storage });
+  const net = browser.sandbox.PixWorldNet.connect({ name: "Alice", character: "ninja", onEvent: () => {} });
+
+  check("la première connexion vise la page", browser.sockets[0].url === "ws://localhost:3000/ws", browser.sockets[0].url);
+
+  net.useServer("192.168.1.24");
+  check("une connexion vers l'autre PC est ouverte", browser.sockets.length === 2, "nb sockets = " + browser.sockets.length);
+  check("elle vise bien l'autre PC", browser.sockets[1].url === "ws://192.168.1.24:3000/ws", browser.sockets[1].url);
+  check("le serveur visé est exposé au jeu", net.server === "ws://192.168.1.24:3000/ws", net.server);
+  check("l'adresse est mémorisée", storage.getItem("pixworld.server") === "192.168.1.24", storage.getItem("pixworld.server"));
+
+  net.useServer("");
+  check("vider l'adresse revient au serveur de la page", browser.sockets[2] && browser.sockets[2].url === "ws://localhost:3000/ws");
+  check("l'adresse mémorisée est oubliée", storage.getItem("pixworld.server") === null);
+  net.close();
+
+  // Adresse fournie directement à la connexion (option `server`).
+  const direct = makeBrowser();
+  const guest = direct.sandbox.PixWorldNet.connect({ name: "Bob", server: "10.0.0.3:8080", onEvent: () => {} });
+  check("l'option server est honorée", direct.sockets[0].url === "ws://10.0.0.3:8080/ws", direct.sockets[0].url);
+  guest.close();
+}
+
 (async () => {
   await testOnlineGame();
   await testNoServer();
   await testReconnect();
   await testLocalTabs();
+  await testServerAddress();
+  await testJoinOtherComputer();
   console.log(failures ? "\n" + failures + " test(s) en échec" : "\nTous les tests passent");
   process.exit(failures ? 1 : 0);
 })();
