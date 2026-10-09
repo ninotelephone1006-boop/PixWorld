@@ -1,6 +1,6 @@
 {
   "name": "pixworld",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "description": "Prototype de jeu de plateforme 2D multijoueur en HTML Canvas",
   "scripts": {

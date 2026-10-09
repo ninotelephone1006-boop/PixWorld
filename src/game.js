@@ -17,7 +17,8 @@
  * graine commune à tous les joueurs. Le rendu des biomes est dans
  * src/scenery.js.
  *
- * Tous les joueurs rejoignent le serveur WebSocket du site : voir src/net.js.
+ * Tous les joueurs rejoignent la même arène : le serveur WebSocket du site
+ * quand il existe, sinon le direct entre joueurs (WebRTC) — voir src/net.js.
  */
 (() => {
   "use strict";
@@ -372,6 +373,7 @@
 
   function describeMode(mode) {
     if (mode === "online") return { label: "en ligne", tone: "online", text: "Tu es dans l’arène commune. Invite tes amis avec le lien du jeu !" };
+    if (mode === "p2p") return { label: "en ligne (direct)", tone: "online", text: "Connecté en direct aux autres joueurs : même lien, mêmes amis, même depuis un autre réseau." };
     if (mode === "reconnect") return { label: "reconnexion", tone: "local", text: "Arène indisponible, nouvelle tentative automatique…" };
     if (mode === "full") return { label: "arène pleine", tone: "local", text: "L’arène est pleine. Nouvelle tentative automatique…" };
     if (mode === "unavailable") return { label: "hors ligne", tone: "solo", text: "Ouvre le lien du jeu hébergé pour rejoindre les autres joueurs." };
@@ -382,8 +384,8 @@
     const target = net && net.serverInfo;
     if (!menuServerShare) return;
     menuServerShare.hidden = !target;
-    if (target) menuServerAddress.textContent = target.httpUrl + "/";
-    if (menuServerHint) menuServerHint.textContent = "Partage le lien du jeu : tes amis rejoignent la même arène, sans configuration. Le site doit être accessible sur Internet pour jouer depuis des réseaux différents.";
+    if (target) menuServerAddress.textContent = target.shareUrl;
+    if (menuServerHint) menuServerHint.textContent = "Partage le lien du jeu : tes amis rejoignent la même arène depuis n’importe quel réseau, sans configuration. Ajoute ?room=nom au lien pour une salle privée.";
   }
 
   /** Copie l'adresse à partager dans le presse-papiers. */
@@ -428,7 +430,9 @@
     const target = net ? net.serverInfo : null;
     playersPanel.dataset.mode = mode;
     playersMode.textContent = info.label;
-    playersMode.title = target ? "Serveur : " + target.display : "";
+    playersMode.title = !target ? "" : target.transport === "p2p"
+      ? "Direct entre joueurs (WebRTC), sans serveur"
+      : "Serveur : " + target.display;
     if (!playing) setStatus(info.text, info.tone);
 
     if (lastMode === "reconnect" && mode === "online") {
