@@ -72,7 +72,7 @@ Quatre combattants ont chacun **leur propre feuille de sprite** (plus aucune tei
 | **Raiden — Samouraï** | Mêlée | Coupe du tonnerre : enchaînement de trois coupes, la 3e plus large | 20 (25 pour la 3e) | fort |
 | **Yume — Arcaniste** | Magie à distance | Orbe astral, après une courte incantation | 16 | fort |
 
-Le choix du héros est synchronisé entre joueurs : sprites, mouvements, déclenchements d'attaque, points de vie et K.O. sont visibles par les autres.
+Le choix du héros est synchronisé entre joueurs : sprites, mouvements, déclenchements d'attaque, points de vie et K.O. sont visibles par les autres. Le sprite se tourne vers le curseur (gauche / droite), même en marchant dans l'autre sens ; le regard suit aussi le défilement de la caméra. Sans curseur actif, notamment au toucher, il garde le sens de la marche.
 
 ## Barre de vie
 
@@ -80,11 +80,12 @@ Chaque joueur porte une **barre de vie** au-dessus de son personnage (et une pet
 
 - un projectile (shuriken, flèche, orbe) enlève des points de vie à la personne touchée ;
 - la coupe de Raiden blesse en mêlée, dans l'arc lumineux qu'elle dessine ;
+- les **blocs naturels et posés bloquent les attaques** : les tirs disparaissent avec un impact sur la paroi et la mêlée ne peut pas blesser à travers un mur ;
 - chaque coup **repousse** la victime, la fait clignoter en blanc et affiche les **dégâts en chiffres flottants** ;
 - côté victime : flash rouge, secousse de caméra, image « blessé » et court étourdissement ;
 - sous 35 points de vie, l'écran se teinte de rouge sur les bords et le cœur bat ;
 - après 5 secondes sans dégâts, la vie remonte doucement (petites étincelles vertes) ;
-- à 0 point de vie, le joueur est **K.O.** : explosion d'éclats, onde de choc, flash et courte pause au sol, puis réapparition au camp de départ en pleine forme (avec une courte invulnérabilité).
+- à 0 point de vie, le joueur est **K.O.** : son **inventaire tombe sur place**, avec explosion d'éclats, onde de choc, flash et courte pause au sol, puis réapparition au camp de départ en pleine forme, sans restauration du stuff perdu (avec une courte invulnérabilité).
 
 Chaque client gère ses propres points de vie et les transmet aux autres 20 fois par seconde, avec un drapeau de K.O. pour que tout le monde voie l'animation. Les impacts de tes attaques sur les autres sont affichés immédiatement (étincelles, anneaux, son) ; les points de vie qui en découlent arrivent par le réseau.
 
@@ -118,8 +119,9 @@ Les touffes sont posées sur le relief de la prairie. L'herbe du premier plan, a
 Le terrain de chaque colonne est une grille de blocs carrés de **32 × 32 px** : **1 couche d'herbe**, **4 couches de terre**, puis **10 couches de pierre** — la dernière est de la **roche mère incassable**, le plancher du monde : personne ne tombe dans le vide, et les blocs forment de vraies parois solides (collisions complètes, on ne traverse ni les murs ni les tours). Les textures pixel art de l'herbe, de la terre et de la pierre sont générées par `tools/make-blocks.py` depuis la feuille de tuiles CC0 « Pixel Platformer » de Kenney (source GitHub et licence dans `assets/CREDITS.md`) : chaque texture est **sans couture** (miroitée), donc les blocs se prolongent **sans aucune délimitation visible** entre eux.
 
 - Le bloc visé par la souris reçoit un contour lumineux. Maintiens le clic gauche sur le même bloc pendant **2 secondes** : les fissures progressent, puis le bloc casse et laisse tomber un petit item.
-- **Clic droit : poser le bloc sélectionné**, façon Minecraft — uniquement contre un bloc existant (jamais en plein air), à portée de main et jamais à l'intérieur d'un joueur. Casser un bloc d'une tour ne fait rien d'autre : rien ne s'effondre.
+- **Clic droit : poser le bloc sélectionné**, façon Minecraft — uniquement contre un bloc existant (jamais en plein air), à portée de main et jamais à l'intérieur d'un joueur. Casser un bloc d'une tour ne fait rien d'autre : rien ne s'effondre. Les blocs posés dans un trou déjà miné restent cassables, même après plusieurs cycles de pose / casse ou une reconnexion.
 - Touche un item pour l'ajouter automatiquement à ton inventaire. Les quantités sont personnelles ; dans l'arène en ligne, le terrain cassé, les blocs posés et les drops sont synchronisés, et le premier joueur qui touche un drop le récupère.
+- **Butin de mort** : tout le stock d'herbe, de terre et de pierre est lâché à la position exacte du K.O., en une pile par type avec sa quantité. Le corps ne ramasse rien ; après réapparition, toi ou un autre joueur pouvez récupérer les piles entières. Elles restent disponibles jusqu'au ramassage (ou au redémarrage du serveur / à la fermeture de l'onglet hors ligne), sans casser les blocs autour.
 - La barre verticale de raccourcis, au **milieu du bord droit**, affiche les trois blocs et leurs quantités. Fais défiler la molette (ou utilise `1`, `2`, `3`) pour changer d'emplacement ; tu peux aussi cliquer sur un emplacement.
 - **Caméra verticale** : en surface, seules **deux rangées de blocs** sont visibles sous le sol (herbe + terre) — la roche n'apparaît que lorsqu'on creuse, la caméra descendant alors avec le joueur.
 - Les modifications du terrain sont gardées en mémoire par le serveur de l'arène ; elles sont partagées par les joueurs connectés et disparaissent lors d'un redémarrage du serveur. Sans connexion, le minage et la pose fonctionnent localement dans l'onglet.
@@ -204,7 +206,7 @@ npm test
 
 Le démarrage complet de la page est rejoué sans navigateur (`test/game-boot.test.js`) : chargement des scripts, quatre héros affichés, connexion à l'arène, entrée en jeu et arrivée d'un autre joueur — de quoi repérer immédiatement un script qui planterait au chargement.
 
-Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, inventaire et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage des drops (`test/net.test.js`, `test/server.test.js`).
+Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, quantités et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage unique du butin (`test/net.test.js`, `test/server.test.js`). Les scénarios de combat (`test/combat.test.js`) rejouent les quatre styles d'attaque face à un mur, la mort avec inventaire, la réapparition, les confirmations réseau tardives et la récupération du stuff hors ligne. Les entrées (`test/input.test.js`) couvrent la visée au curseur en marchant dans l'autre sens, le déplacement de caméra, le HUD, la pause et le toucher. Les tests de minage et de serveur vérifient aussi les trous rebouchés plusieurs fois et le minage maintenu lorsqu'un bloc est reposé entre deux images.
 
 ## Sprites et décor
 

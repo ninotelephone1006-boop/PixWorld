@@ -117,6 +117,27 @@ assert.equal(arena.breakBlock(2, arena.layerCount - 1), null, "La roche mère ne
 // Inventaire : dépenser puis rembourser.
 assert.equal(arena.spendBlock("stone"), false, "Rien à dépenser sans collecte");
 
+// Un trou peut être rebouché puis cassé autant de fois qu'on veut : la
+// suppression du terrain naturel ne masque jamais le bloc posé dessus.
+const rebuiltTerrain = Mining.create({ worldWidth: 160, blockSize: 32 });
+for (const row of [0, 3, 8]) {
+  rebuiltTerrain.breakBlock(2, row, { createDrop: false });
+  for (const type of ["grass", "dirt", "stone"]) {
+    assert.ok(rebuiltTerrain.placeBlock(2, row, type));
+    const brokenAgain = rebuiltTerrain.breakBlock(2, row, { dropId: "local:rebuilt:" + row + ":" + type });
+    assert.ok(brokenAgain, "Un bloc posé dans un trou reste cassable, à toute profondeur");
+    assert.equal(brokenAgain.type, type);
+    assert.equal(brokenAgain.drop.type, type);
+    assert.equal(rebuiltTerrain.isPlaced(2, row), false);
+    assert.equal(rebuiltTerrain.isRemoved(2, row), true);
+    assert.equal(rebuiltTerrain.blockType(2, row), null, "Le bloc naturel ne revient pas après la casse");
+  }
+}
+const rebuiltSnapshot = Mining.create({ worldWidth: 160, blockSize: 32 });
+rebuiltSnapshot.applyState({ mined: [[2, 0]], placed: [[2, 0, "stone"]], drops: [] });
+assert.equal(rebuiltSnapshot.breakBlock(2, 0, { createDrop: false }).type, "stone", "Le bloc rebouché reçu en snapshot est cassable lui aussi");
+assert.equal(rebuiltSnapshot.blockType(2, 0), null);
+
 // ─────────── Les drops ne traversent jamais les blocs ───────────
 const HALF = Mining.constants.DROP_SIZE / 2;
 const dropOverlapsSolid = (mine, drop) => {
@@ -175,4 +196,91 @@ assert.equal(dropOverlapsSolid(lateral, resting), false, "Le drop ne traverse pa
 assert.ok(resting.x <= 32 - HALF + 0.01, "Le drop est resté contre le mur");
 assert.ok(Math.abs(baseY + resting.depth + HALF - (baseY + 96)) < 0.01, "Le drop repose au fond du trou");
 
-console.log("mining.test.js : terrain, couches, minage, collisions, drops, inventaire et synchronisation : ok");
+// ─────────── Les attaques sont bloquées sur tout leur trajet ───────────
+const combat = Mining.create({ worldWidth: 640, blockSize: 32 });
+combat.placeBlock(3, -1, "stone");
+combat.placeBlock(7, -1, "dirt");
+const shotY = baseY - 16;
+assert.equal(combat.traceSolid(8, shotY - 32, 630, shotY - 32, baseY), null, "L'air reste traversable");
+let impact = combat.traceSolid(8, shotY, 630, shotY, baseY);
+assert.equal(impact.column, 3, "Le premier mur arrête même un tir qui franchit plusieurs blocs en une image");
+assert.equal(impact.x, 96);
+assert.ok(Math.abs(impact.t - (96 - 8) / (630 - 8)) < 1e-9);
+impact = combat.traceSolid(630, shotY, 8, shotY, baseY);
+assert.equal(impact.column, 7, "Le premier mur est aussi trouvé vers la gauche");
+assert.equal(impact.x, 256);
+impact = combat.traceSolid(8, shotY, 630, shotY, baseY, 11, 11);
+assert.equal(impact.x, 85, "La taille du projectile est balayée, pas seulement son centre");
+assert.equal(impact.contactX, 96, "L'effet d'impact tombe sur la face du bloc");
+assert.equal(combat.traceSolid(105, shotY, 105, shotY, baseY).t, 0, "Un tir né dans un bloc s'arrête immédiatement");
+assert.equal(combat.traceSolid(8, baseY + 16, 630, baseY + 16, baseY).type, "grass", "Les blocs naturels arrêtent les attaques");
+assert.equal(combat.traceSolid(10, baseY - 80, 10, baseY + 1000, baseY).row, 0, "Le sol bloque un segment vertical");
+const diagonal = combat.traceSolid(70, baseY - 60, 130, baseY - 5, baseY);
+assert.equal(diagonal.column, 3, "La ligne de vue en mêlée ne coupe pas les coins d'un bloc");
+combat.breakBlock(3, -1, { createDrop: false });
+assert.equal(combat.traceSolid(8, shotY, 200, shotY, baseY), null, "Casser le mur ouvre les tirs et la mêlée");
+combat.placeBlock(3, -1, "grass");
+assert.equal(combat.traceSolid(8, shotY, 200, shotY, baseY).type, "grass", "Un mur reconstruit protège de nouveau");
+// Les coordonnées restent correctes lorsque la hauteur du canvas change.
+assert.equal(combat.traceSolid(8, 900 - 16, 200, 900 - 16, 900).contactY, 884);
+const rectHit = Mining.segmentRectHit(0, 10, 100, 10, { x: 40, y: 0, width: 20, height: 20 });
+assert.equal(rectHit.t, 0.4, "Le contact avec un joueur peut être comparé à celui du mur");
+assert.equal(Mining.segmentRectHit(0, 30, 100, 30, { x: 40, y: 0, width: 20, height: 20 }), null);
+assert.equal(combat.traceSolid(NaN, shotY, 100, shotY, baseY), null, "Une entrée non finie ne boucle pas");
+
+// ─────────── Mort : l'inventaire entier tombe en piles récupérables ───────────
+const loot = Mining.create({ worldWidth: 320, blockSize: 32 });
+const belongings = { grass: 3, dirt: 2, stone: 4000 };
+Object.entries(belongings).forEach(([type, quantity]) => {
+  for (let n = 0; n < quantity; n++) loot.refundBlock(type);
+});
+const deathDrops = loot.dropInventory(96, -30, { idPrefix: "local:death:1", networked: false });
+assert.equal(deathDrops.length, 3, "Une pile par type, même avec un gros inventaire");
+assert.equal(JSON.stringify(loot.inventory()), JSON.stringify({ grass: 0, dirt: 0, stone: 0 }), "L'inventaire est vidé immédiatement");
+deathDrops.forEach((drop) => {
+  assert.equal(drop.quantity, belongings[drop.type], "Aucune quantité n'est perdue");
+  assert.equal(drop.kind, "death");
+  assert.equal(drop.x, 96, "Le butin naît à la position exacte de la mort");
+  assert.equal(drop.depth, -30, "La profondeur n'est pas arrondie à une cellule");
+  assert.equal(drop.networked, false);
+});
+assert.equal(loot.blockType(3, 0), "grass", "Lâcher l'inventaire ne mine aucun bloc");
+assert.equal(loot.dropInventory(96, -30).length, 0, "Une deuxième mort avec un inventaire vide ne duplique rien");
+simulateDrops(loot, 46);
+assert.equal(loot.getDrops().length, 3, "Le butin reste récupérable au-delà de la durée des drops de minage");
+loot.getDrops().forEach((drop) => {
+  assert.equal(dropOverlapsSolid(loot, drop), false, "Les piles de mort ne traversent pas le terrain");
+  const item = loot.collectDrop(drop.id);
+  assert.equal(item.quantity, belongings[item.type]);
+  assert.equal(loot.collectDrop(drop.id), null, "Chaque pile ne se récupère qu'une fois");
+});
+assert.equal(JSON.stringify(loot.inventory()), JSON.stringify(belongings), "Ramasser les piles restitue toutes les quantités");
+// Un remboursement tardif ne doit pas vider les nouveaux items déjà ramassés.
+const refundLoot = loot.dropInventory(140, -50, { quantities: { grass: 1 } });
+assert.equal(refundLoot.length, 1);
+assert.equal(refundLoot[0].quantity, 1);
+assert.equal(loot.inventory().grass, 2);
+assert.equal(loot.inventory().stone, 4000);
+assert.equal(loot.dropInventory(NaN, -30).length, 0, "Une position invalide ne détruit pas l'inventaire");
+
+// État réseau et arrivées tardives : un drop de mort ne marque jamais sa
+// cellule comme minée, même lorsqu'il est situé sous la surface.
+const lateLoot = Mining.create({ worldWidth: 320, blockSize: 32 });
+const descriptor = { id: "p1:death:5:dirt", kind: "death", type: "dirt", quantity: 12, x: 100, depth: 20, ownerId: "p1" };
+lateLoot.applyState({ mined: [], placed: [], drops: [descriptor] });
+assert.equal(lateLoot.blockType(3, 0), "grass", "L'état de butin ne crée pas un trou dans le terrain");
+assert.equal(lateLoot.getDrops()[0].quantity, 12);
+assert.equal(lateLoot.getDrops()[0].depth, 20);
+assert.equal(lateLoot.getDrops()[0].networked, true);
+assert.equal(lateLoot.addDrop({ ...descriptor, networked: true }), null, "La confirmation ne crée pas une deuxième pile");
+assert.equal(lateLoot.getDrops().length, 1);
+assert.equal(lateLoot.collectDrop(descriptor.id).quantity, 12);
+assert.equal(lateLoot.inventory().dirt, 12, "Le ramassage réseau conserve les quantités");
+lateLoot.addDrop({ ...descriptor, id: "p1:death:6:dirt", networked: true });
+lateLoot.applyState({ drops: [] });
+assert.equal(lateLoot.getDrops().length, 0, "Une pile récupérée ailleurs disparaît après synchronisation");
+assert.equal(lateLoot.addDrop({ ...descriptor, quantity: -1 }), null, "Pas de quantité négative");
+assert.equal(lateLoot.addDrop({ ...descriptor, quantity: 1.5 }), null, "Pas de quantité fractionnaire");
+assert.equal(lateLoot.addDrop({ ...descriptor, type: "constructor" }), null, "Seuls les vrais types de blocs sont acceptés");
+
+console.log("mining.test.js : terrain, collisions des attaques, butin de mort, quantités et synchronisation : ok");

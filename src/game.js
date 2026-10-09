@@ -8,7 +8,8 @@
  * Combat : chaque joueur porte une barre de vie. Les attaques des autres
  * (projectiles et coups de mêlée) nous enlèvent des points, nous repoussent
  * et déclenchent flash, secousse de caméra, étincelles et chiffres de dégâts.
- * À 0, une courte séquence de K.O. précède la réapparition au camp de départ.
+ * Les blocs arrêtent les tirs et protègent des coups de mêlée. À 0, le
+ * joueur lâche son inventaire puis réapparaît au camp après un court K.O.
  * Tout est accompagné d'effets sonores synthétisés (src/audio.js) et
  * d'effets visuels (src/effects.js).
  *
@@ -89,6 +90,11 @@
   const FLASH_DURATION = 0.09; // silhouette blanche après un coup
   const LOW_HP = 35; // en dessous : vignette rouge et battements de cœur
   const COMBO_FINISHER_BONUS = 5; // la 3e coupe de Raiden frappe plus fort
+  const PROJECTILE_BOUNDS = {
+    arrow: { halfWidth: 19, halfHeight: 5 },
+    shuriken: { halfWidth: 11, halfHeight: 11 },
+    orb: { halfWidth: 13, halfHeight: 13 },
+  };
 
   // ─────────────────────────── Sprites et décor ───────────────────────────
   // Chaque héros possède sa feuille complète : les ninjas CC0 pour Kage et
@@ -229,12 +235,15 @@
   let selectedCharacter = "ninja";
   let lastPanelHp = MAX_HP;
   const projectiles = [];
+  const aimPointer = { x: 0, inside: false }; // visée indépendante des clics de minage / du HUD
   const miningPointer = { x: 0, y: 0, inside: false, down: false, pointerId: null };
   let miningTargetKey = null;
   let miningElapsed = 0;
   let miningRequestedKey = null;
   let miningSequence = 1;
   const pendingMiningSerials = new Set();
+  const pendingDeathPickups = new Map(); // collecte en vol -> lieu de la mort
+  let deathDropOrigin = null;
   let selectedHotbarSlot = 0;
 
   // ───────────────────────── État multijoueur ─────────────────────────
@@ -710,6 +719,8 @@
     player.hurtTime = 0;
     player.flashTime = 0;
     player.deadTime = 0;
+    deathDropOrigin = null;
+    pendingDeathPickups.clear();
     player.timeSinceDamage = 99;
     player.regenAnnounced = true;
     projectiles.length = 0;
@@ -772,6 +783,7 @@
         mining.applyState(message.mining || {});
         mining.clearPendingClaims();
         pendingMiningSerials.clear();
+        pendingDeathPickups.clear();
         (message.players || []).forEach(addPeer);
         updateHotbar();
         panelDirty = true;
@@ -797,11 +809,24 @@
         miningElapsed = 0;
         break;
       }
+      case "deathDrop": {
+        if (Array.isArray(message.drops)) {
+          message.drops.forEach((drop) => mining.addDrop({ ...drop, networked: true }));
+        }
+        break;
+      }
       case "minePickup": {
+        const origin = pendingDeathPickups.get(message.dropId) || (player.deadTime > 0 ? deathDropOrigin : null);
+        pendingDeathPickups.delete(message.dropId);
         const item = message.collectorId === myId
           ? mining.collectDrop(message.dropId)
           : mining.removeDrop(message.dropId);
-        if (item && message.collectorId === myId) awardMinedDrop(item);
+        if (item && message.collectorId === myId) {
+          // Un ramassage confirmé après le coup fatal appartient encore au
+          // butin de cette mort, pas au nouvel inventaire après réapparition.
+          if (origin) dropPlayerInventory(origin, { [item.type]: item.quantity });
+          else awardMinedDrop(item);
+        }
         break;
       }
       case "placeBlock": {
@@ -823,6 +848,8 @@
         if (info) {
           mining.removePlaced(info.column, info.row);
           mining.refundBlock(info.type);
+          const origin = info.deathOrigin || (player.deadTime > 0 ? deathDropOrigin : null);
+          if (origin) dropPlayerInventory(origin, { [info.type]: 1 });
         }
         updateHotbar();
         break;
@@ -864,6 +891,7 @@
         others.clear();
         mining.clearPendingClaims();
         pendingMiningSerials.clear();
+        pendingDeathPickups.clear();
         resetMiningInput();
         toast("Connexion perdue", true);
         sfx("connectionLost");
@@ -1175,12 +1203,43 @@
     if (player.hp <= 0) startDeath(character);
   }
 
+  function dropPlayerInventory(origin, quantities) {
+    if (!origin) return [];
+    const connected = net && net.mode === "online" && hasJoined && myId;
+    const serial = miningSequence++;
+    const dropped = mining.dropInventory(origin.x, origin.depth, {
+      idPrefix: (connected ? myId : "local") + ":death:" + serial,
+      ownerId: connected ? myId : null,
+      networked: Boolean(connected),
+      quantities,
+    });
+    if (dropped.length) {
+      updateHotbar();
+      if (connected) {
+        const inventory = {};
+        dropped.forEach((drop) => { inventory[drop.type] = drop.quantity; });
+        net.dropInventory(origin.x, origin.depth, inventory, serial);
+      }
+    }
+    return dropped;
+  }
+
   function startDeath(character) {
+    if (player.deadTime > 0) return;
     const me = playerCenter();
     player.hp = 0;
     player.deadTime = KO_DURATION;
     player.attackTime = 0;
     player.shotTimer = -1;
+    deathDropOrigin = { x: me.x, depth: me.y - groundY };
+    mining.getDrops().forEach((drop) => {
+      if (drop.pending && !pendingDeathPickups.has(drop.id)) pendingDeathPickups.set(drop.id, deathDropOrigin);
+    });
+    pendingPlacements.forEach((info) => {
+      if (!info.deathOrigin) info.deathOrigin = deathDropOrigin;
+    });
+    dropPlayerInventory(deathDropOrigin);
+    resetMiningInput();
     // Le corps garde l'élan du coup fatal (recul, petit bond) et retombe.
     player.knockback *= 1.4;
     if (player.grounded) {
@@ -1193,7 +1252,7 @@
     fx.text(me.x, player.y - 24, "K.O. !", { color: "#ffd166", size: 24, vy: -40, duration: 1.3 });
     sfx("ko", { important: true });
     sfx("koBoom", { important: true });
-    toast("Tu as été mis K.O. · réapparition au camp de départ", true);
+    toast("Tu as été mis K.O. · inventaire lâché sur place · réapparition au camp", true);
     panelDirty = true;
   }
 
@@ -1201,6 +1260,7 @@
     const character = characterFor(identity.character);
     player.hp = MAX_HP;
     player.deadTime = 0;
+    deathDropOrigin = null;
     player.x = SPAWN_X;
     player.y = groundAt(centerOf(player.x)) - player.height;
     player.velocityX = 0;
@@ -1219,24 +1279,12 @@
     panelDirty = true;
   }
 
-  function hitsLocalPlayer(x, y, margin) {
-    const m = margin == null ? 8 : margin;
-    return (
-      x > player.x - m &&
-      x < player.x + player.width + m &&
-      y > player.y - m &&
-      y < player.y + player.height + m
-    );
-  }
-
-  function hitsPeer(peer, x, y, margin) {
-    const m = margin == null ? 8 : margin;
-    return (
-      x > peer.rx - m &&
-      x < peer.rx + player.width + m &&
-      y > peer.ry - m &&
-      y < peer.ry + player.height + m
-    );
+  function projectileTargetHit(projectile, x0, x1, x, y) {
+    const margin = 8;
+    return window.PixWorldMining.segmentRectHit(x0, projectile.y, x1, projectile.y, {
+      x: x - margin, y: y - margin,
+      width: player.width + margin * 2, height: player.height + margin * 2,
+    });
   }
 
   /** Zone frappée par une coupe : devant l'attaquant, sur toute sa hauteur. */
@@ -1244,7 +1292,8 @@
     const reach = comboStep(serial) === 2 ? 128 : 112;
     const dx = (targetX - attackerX) * facing;
     const dy = Math.abs(targetY - attackerY);
-    return dx > -28 && dx < reach && dy < 82;
+    return dx > -28 && dx < reach && dy < 82 &&
+      !mining.traceSolid(attackerX, attackerY, targetX, targetY, groundY);
   }
 
   function slashWindow(character, timeLeft) {
@@ -1320,6 +1369,28 @@
     return mining.blockAt(worldX, worldY, groundY);
   }
 
+  function updatePlayerFacing() {
+    if (!playing || player.deadTime > 0 || !aimPointer.inside) return;
+    const dx = aimPointer.x + camX - fx.shakeX - centerOf(player.x);
+    // Ne pas faire clignoter le miroir du sprite quand la souris est au centre.
+    if (Math.abs(dx) > 4) player.facing = dx > 0 ? 1 : -1;
+  }
+
+  function updateAimPointer(event) {
+    // Le toucher n'a pas de curseur persistant : garder le sens de la marche.
+    if (event.pointerType === "touch") {
+      aimPointer.inside = false;
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    aimPointer.inside = Number.isFinite(x) && Number.isFinite(y) &&
+      x >= 0 && x <= rect.width && y >= 0 && y <= rect.height;
+    if (aimPointer.inside) aimPointer.x = x;
+    updatePlayerFacing();
+  }
+
   function updateMiningPointer(event) {
     const rect = canvas.getBoundingClientRect();
     miningPointer.x = event.clientX - rect.left;
@@ -1336,8 +1407,17 @@
     miningRequestedKey = null;
   }
 
+  function invalidateMiningProgress(block) {
+    const key = block.column + "," + block.row;
+    if (miningTargetKey !== key && miningRequestedKey !== key) return;
+    miningTargetKey = null;
+    miningElapsed = 0;
+    miningRequestedKey = null;
+  }
+
   function blockBreakFeedback(block, remote) {
     if (!block) return;
+    invalidateMiningProgress(block);
     const x = block.x + block.size / 2;
     const y = groundY + block.row * BLOCK_SIZE + BLOCK_SIZE / 2;
     fx.dust(x, y, { count: remote ? 4 : 8, direction: remote ? 0 : player.facing });
@@ -1395,6 +1475,9 @@
   }
 
   function placementFeedback(block) {
+    // Une nouvelle génération de bloc dans la même case exige un nouveau
+    // minage, même si la pose et la casse arrivent entre deux images.
+    invalidateMiningProgress(block);
     fx.dust(block.x + BLOCK_SIZE / 2, groundY + block.row * BLOCK_SIZE + BLOCK_SIZE / 2, { count: 5 });
     sfx("impactSpark", { volume: 0.32, pitch: 1.25 });
   }
@@ -1448,7 +1531,7 @@
     const label = window.PixWorldMining.BLOCKS[drop.type].label;
     updateHotbar();
     sfx("uiSelect", { volume: 0.58, pitch: 1.15 });
-    fx.text(drop.x, groundY + drop.depth - 11, "+1 " + label.toLowerCase(), {
+    fx.text(drop.x, groundY + drop.depth - 11, "+" + drop.quantity + " " + label.toLowerCase(), {
       color: drop.type === "stone" ? "#e1edf0" : drop.type === "dirt" ? "#ffd09a" : "#bdf27b",
       size: 14,
       duration: 0.9,
@@ -1509,8 +1592,11 @@
         updateDeadBody(delta);
         if (player.deadTime === 0) respawn();
       } else {
+        updatePlayerFacing();
         updateLocalCombatTimers(delta);
         updateLocalMovement(delta);
+        // La caméra et le joueur bougent aussi lorsque le curseur est immobile.
+        updatePlayerFacing();
       }
     }
 
@@ -1638,7 +1724,7 @@
     player.knockback *= Math.max(0, 1 - delta * 9);
     if (Math.abs(player.knockback) < 4) player.knockback = 0;
     player.velocityX = walk + player.knockback;
-    if (direction !== 0 && !stunned) player.facing = direction;
+    if (direction !== 0 && !stunned && !aimPointer.inside) player.facing = direction;
 
     // Caméra qui suit le joueur, bornée au monde : parallaxe du décor.
     const target = clamp(player.x + player.width / 2 - width / 2, 0, Math.max(0, WORLD_WIDTH - width));
@@ -1774,7 +1860,10 @@
     if (Math.random() > delta * 60) return;
     const angle = (Math.random() - 0.5) * 1.6;
     const radius = 40 + Math.random() * 18;
-    fx.sparks(center.x + facing * Math.cos(angle) * radius, center.y + Math.sin(angle) * radius, {
+    const x = center.x + facing * Math.cos(angle) * radius;
+    const y = center.y + Math.sin(angle) * radius;
+    if (mining.traceSolid(center.x, center.y, x, y, groundY)) return;
+    fx.sparks(x, y, {
       count: 1,
       direction: facing,
       color,
@@ -1791,9 +1880,32 @@
   function updateProjectiles(delta) {
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const projectile = projectiles[i];
-      projectile.x += projectile.speed * projectile.facing * delta;
+      const x0 = projectile.x;
+      const x1 = x0 + projectile.speed * projectile.facing * Math.min(delta, Math.max(0, projectile.life));
       projectile.age += delta;
       projectile.life -= delta;
+
+      // Balayage continu : jamais de traversée d'un bloc entre deux images.
+      // On choisit le premier contact (bloc ou joueur) ; le bloc gagne les
+      // égalités, donc aucune victime derrière une paroi ne prend de dégâts.
+      let hit = mining.traceSolid(x0, projectile.y, x1, projectile.y, groundY, projectile.halfWidth, projectile.halfHeight);
+      let target = null;
+      if (projectile.owner !== "self" && player.deadTime === 0) {
+        const localHit = projectileTargetHit(projectile, x0, x1, player.x, player.y);
+        if (localHit && (!hit || localHit.t < hit.t)) {
+          hit = localHit;
+          target = "self";
+        }
+      }
+      others.forEach((peer) => {
+        if (peer.dead || peer.id === projectile.owner) return;
+        const peerHit = projectileTargetHit(projectile, x0, x1, peer.rx, peer.ry);
+        if (peerHit && (!hit || peerHit.t < hit.t)) {
+          hit = peerHit;
+          target = peer;
+        }
+      });
+      projectile.x = hit ? hit.x : x1;
 
       // Traînée : quelques particules par image selon le style.
       projectile.trailTimer -= delta;
@@ -1802,46 +1914,37 @@
         fx.trail(projectile.x, projectile.y, projectile.style, projectile.color, projectile.facing);
       }
 
-      let remove = false;
-      // Chaque client ne blesse que lui-même : la victime fait ses comptes.
-      if (projectile.owner !== "self" && player.deadTime === 0 && hitsLocalPlayer(projectile.x, projectile.y)) {
-        applyDamage(projectile.damage, {
-          x: projectile.x,
-          facing: projectile.facing,
-          style: projectile.style,
-          color: projectile.color,
-          knockback: projectile.knockback,
-          hitSound: projectile.hitSound,
-        });
-        remove = true;
-      }
-      if (!remove) {
-        // Impact visuel sur les autres joueurs (leurs dégâts arrivent par le réseau).
-        others.forEach((peer) => {
-          if (remove || peer.dead || peer.id === projectile.owner) return;
-          if (hitsPeer(peer, projectile.x, projectile.y)) {
-            remove = true;
-            const center = peerCenter(peer);
-            fx.impact(projectile.x, projectile.y, projectile.style, projectile.color, projectile.facing);
-            if (projectile.owner === "self") {
-              peer.lastHitByUsAt = performance.now();
-              fx.shake(2, 0.1);
-              sfx(projectile.hitSound);
-              sfx("impactSpark", { volume: 0.5 });
-            } else {
-              sfxAt(projectile.hitSound, center.x, { volume: 0.7 });
-            }
+      if (hit) {
+        if (target === "self") {
+          // Chaque client ne blesse que lui-même : la victime fait ses comptes.
+          applyDamage(projectile.damage, {
+            x: projectile.x, facing: projectile.facing, style: projectile.style,
+            color: projectile.color, knockback: projectile.knockback, hitSound: projectile.hitSound,
+          });
+        } else if (target) {
+          fx.impact(projectile.x, projectile.y, projectile.style, projectile.color, projectile.facing);
+          if (projectile.owner === "self") {
+            target.lastHitByUsAt = performance.now();
+            fx.shake(2, 0.1);
+            sfx(projectile.hitSound);
+            sfx("impactSpark", { volume: 0.5 });
+          } else {
+            sfxAt(projectile.hitSound, peerCenter(target).x, { volume: 0.7 });
           }
-        });
+        } else {
+          fx.impact(hit.contactX, hit.contactY, projectile.style, projectile.color, projectile.facing);
+          sfxAt(projectile.hitSound, hit.contactX, { volume: 0.65 });
+        }
+        projectiles.splice(i, 1);
+        continue;
       }
-      if (!remove && (projectile.life <= 0 || projectile.x < -80 || projectile.x > WORLD_WIDTH + 80)) {
-        remove = true;
+      if (projectile.life <= 0 || projectile.x < -80 || projectile.x > WORLD_WIDTH + 80) {
         if (projectile.life <= 0) {
           fx.burst(projectile.x, projectile.y, { count: 5, colors: ["#ffffff", projectile.color], minSize: 1.5, maxSize: 3, maxSpeed: 90, gravity: 200 });
           sfxAt("fizzle", projectile.x, { volume: 0.5 });
         }
+        projectiles.splice(i, 1);
       }
-      if (remove) projectiles.splice(i, 1);
     }
   }
 
@@ -1887,6 +1990,7 @@
   function startAttack() {
     if (!playing || player.attackTime > 0 || player.deadTime > 0) return;
     if (player.hurtTime > HURT_DURATION * 0.55) return;
+    updatePlayerFacing();
     const character = characterFor(identity.character);
     player.attackTime = character.attackDuration;
     player.attackSerial += 1;
@@ -1904,6 +2008,7 @@
   function spawnProjectile(character, x, y, facing, color, owner) {
     projectiles.push({
       style: character.attackStyle,
+      ...PROJECTILE_BOUNDS[character.attackStyle],
       x,
       y,
       facing,
@@ -2623,26 +2728,26 @@
   });
   window.addEventListener("blur", () => {
     keys.clear();
+    aimPointer.inside = false;
     miningPointer.inside = false;
     resetMiningInput();
   });
 
   window.addEventListener("pointermove", (event) => {
+    updateAimPointer(event);
     if (event.target === canvas || miningPointer.down) updateMiningPointer(event);
     else miningPointer.inside = false;
   });
+  window.addEventListener("pointerout", (event) => {
+    if (!event.relatedTarget) aimPointer.inside = false;
+  });
+  window.addEventListener("pointerdown", updateAimPointer);
 
-  // Clic gauche sur un bloc : minage continu (2 s). Ailleurs, il reste une attaque.
+  // Clic gauche sur un bloc : minage continu (0,2 s). Ailleurs, il reste une attaque.
   window.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !playing || event.target !== canvas) return;
     event.preventDefault();
     updateMiningPointer(event);
-    const clickX = miningPointer.x;
-    const playerScreenX = player.x + player.width / 2 - camX;
-    if (Math.abs(clickX - playerScreenX) > 4 && player.deadTime === 0) {
-      player.facing = clickX > playerScreenX ? 1 : -1;
-    }
-
     const target = currentMiningTarget();
     if (target && player.deadTime === 0) {
       miningPointer.down = true;
@@ -2663,7 +2768,10 @@
   window.addEventListener("pointerup", (event) => {
     if (event.button === 0) resetMiningInput();
   });
-  window.addEventListener("pointercancel", resetMiningInput);
+  window.addEventListener("pointercancel", () => {
+    aimPointer.inside = false;
+    resetMiningInput();
+  });
 
   // Clic droit : poser le bloc sélectionné de la hotbar, façon Minecraft —
   // uniquement contre un bloc existant, à portée, jamais en plein air.
@@ -2708,15 +2816,19 @@
   openMenu("start");
   requestAnimationFrame(frame);
 
-  // Accroche de test « tête nue » (test/gameplay.test.js) : état minimal du
-  // joueur, de la caméra et du terrain, sans rien exposer d'autre.
+  // Accroche de test « tête nue » : instantanés en lecture seule du joueur,
+  // de la caméra, du terrain et des combats (aucune mutation du jeu).
   window.PixWorldDebug = {
     get player() {
-      return { x: player.x, y: player.y, grounded: player.grounded, dead: player.deadTime > 0 };
+      return { x: player.x, y: player.y, hp: player.hp, facing: player.facing, grounded: player.grounded, dead: player.deadTime > 0 };
     },
+    get camX() { return camX; },
     get camY() { return camY; },
     get groundY() { return groundY; },
     placed: () => mining.getPlaced(),
     inventory: () => mining.inventory(),
+    drops: () => mining.getDrops(),
+    projectiles: () => projectiles.map(({ style, x, y, owner }) => ({ style, x, y, owner })),
+    peers: () => Array.from(others.values(), ({ id, lastHitByUsAt }) => ({ id, lastHitByUsAt })),
   };
 })();

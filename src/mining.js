@@ -34,6 +34,7 @@ window.PixWorldMining = (() => {
     stone: Object.freeze({ id: "stone", label: "Pierre", image: "assets/blocks/stone.png", base: "#809196", detail: "#526168" }),
   });
 
+  const BLOCK_TYPES = Object.freeze(Object.keys(BLOCKS));
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const cellKey = (column, row) => column + "," + row;
   const EPS = 0.001;
@@ -48,6 +49,30 @@ window.PixWorldMining = (() => {
     return hash >>> 0;
   }
 
+  /** Premier contact d'un segment avec un rectangle (t entre 0 et 1). */
+  function segmentRectHit(x0, y0, x1, y1, rect) {
+    if (![x0, y0, x1, y1, rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) ||
+        rect.width <= 0 || rect.height <= 0) return null;
+    let enter = 0;
+    let exit = 1;
+    const axes = [
+      [x0, x1 - x0, rect.x, rect.x + rect.width],
+      [y0, y1 - y0, rect.y, rect.y + rect.height],
+    ];
+    for (const [start, delta, min, max] of axes) {
+      if (delta === 0) {
+        if (start < min || start > max) return null;
+      } else {
+        const a = (min - start) / delta;
+        const b = (max - start) / delta;
+        enter = Math.max(enter, Math.min(a, b));
+        exit = Math.min(exit, Math.max(a, b));
+        if (enter > exit) return null;
+      }
+    }
+    return { t: enter, x: x0 + (x1 - x0) * enter, y: y0 + (y1 - y0) * enter };
+  }
+
   function create(options) {
     const config = options || {};
     const worldWidth = Math.max(BLOCK_SIZE, Number(config.worldWidth) || 100000);
@@ -58,6 +83,7 @@ window.PixWorldMining = (() => {
     let minPlacedRow = 0; // rangée la plus haute occupée par un bloc posé
     const drops = new Map();
     const inventory = { grass: 0, dirt: 0, stone: 0 };
+    let inventoryDropSequence = 0;
 
     function isInBounds(column, row) {
       return Number.isInteger(column) && Number.isInteger(row) &&
@@ -163,6 +189,45 @@ window.PixWorldMining = (() => {
         }
       }
       return false;
+    }
+
+    /**
+     * Premier bloc rencontré sur tout le trajet d'une attaque, même si elle
+     * traverse plusieurs cellules en une image. Les demi-tailles permettent
+     * de balayer le corps d'un projectile ; sans elles, c'est une ligne de vue.
+     */
+    function traceSolid(x0, y0, x1, y1, baseY, halfWidth, halfHeight) {
+      if (![x0, y0, x1, y1].every(Number.isFinite)) return null;
+      const base = Number(baseY) || 0;
+      const hx = Number.isFinite(halfWidth) ? Math.max(0, halfWidth) : 0;
+      const hy = halfHeight == null ? hx : Number.isFinite(halfHeight) ? Math.max(0, halfHeight) : 0;
+      const c0 = Math.max(0, Math.floor((Math.min(x0, x1) - hx) / blockSize));
+      const c1 = Math.min(columns - 1, Math.floor((Math.max(x0, x1) + hx) / blockSize));
+      const floorRow = LAYER_TYPES.length;
+      const r0 = Math.max(MIN_ROW, Math.min(floorRow, Math.floor((Math.min(y0, y1) - hy - base) / blockSize)));
+      const r1 = Math.min(floorRow, Math.floor((Math.max(y0, y1) + hy - base) / blockSize));
+      let closest = null;
+      for (let row = r0; row <= r1; row++) {
+        for (let column = c0; column <= c1; column++) {
+          if (!solidAt(column, row)) continue;
+          const bx = column * blockSize;
+          const by = base + row * blockSize;
+          // La cellule sous la grille représente tout le plancher du monde.
+          const bottom = row === floorRow ? Math.max(by + blockSize, y0 + hy + EPS, y1 + hy + EPS) : by + blockSize;
+          const hit = segmentRectHit(x0, y0, x1, y1, {
+            x: bx - hx, y: by - hy,
+            width: blockSize + hx * 2, height: bottom - by + hy * 2,
+          });
+          if (hit && (!closest || hit.t < closest.t)) {
+            closest = {
+              ...hit, column, row, type: row === floorRow ? "stone" : blockType(column, row),
+              contactX: clamp(hit.x, bx, bx + blockSize),
+              contactY: clamp(hit.y, by, bottom),
+            };
+          }
+        }
+      }
+      return closest;
     }
 
     /** Les pieds (y + h) touchent-ils un bloc solide juste en dessous ? */
@@ -324,21 +389,68 @@ window.PixWorldMining = (() => {
       const id = String(data.id || data.dropId || "local:" + column + ":" + row);
       const seed = hashText(id + ":" + column + ":" + row);
       const ownerId = data.ownerId == null ? null : String(data.ownerId);
+      const death = data.kind === "death";
       return {
         id,
         column,
         row,
         type,
+        quantity: Number.isSafeInteger(data.quantity) && data.quantity > 0 ? data.quantity : 1,
+        kind: death ? "death" : "mined",
         ownerId,
         networked: data.networked == null ? ownerId !== null && id.indexOf("local:") !== 0 : Boolean(data.networked),
-        x: (column + 0.5) * blockSize,
-        depth: row * blockSize - DROP_SIZE * 0.42,
-        vx: ((seed & 255) / 255 - 0.5) * 82,
-        vy: -42 - ((seed >>> 8) % 34),
+        x: death ? clamp(data.x, DROP_SIZE / 2, worldWidth - DROP_SIZE / 2) : (column + 0.5) * blockSize,
+        depth: death ? data.depth : row * blockSize - DROP_SIZE * 0.42,
+        vx: ((seed & 255) / 255 - 0.5) * (death ? 120 : 82),
+        vy: (death ? -95 : -42) - ((seed >>> 8) % 34),
         age: 0,
         phase: ((seed >>> 16) % 628) / 100,
         pending: false,
       };
+    }
+
+    /** Ajoute un item sans casser ni modifier le terrain (notamment à la mort). */
+    function addDrop(data) {
+      if (!data || typeof data.id !== "string" || !data.id || !BLOCK_TYPES.includes(data.type)) return null;
+      const id = data.id.slice(0, 80);
+      if (drops.has(id)) return null; // confirmation réseau / retransmission
+      const quantity = data.quantity == null ? 1 : data.quantity;
+      if (!Number.isSafeInteger(quantity) || quantity <= 0) return null;
+      let column = Number(data.column);
+      let row = Number(data.row);
+      if (data.kind === "death") {
+        if (!Number.isFinite(data.x) || data.x < 0 || data.x > worldWidth || !Number.isFinite(data.depth)) return null;
+        column = Math.floor(clamp(data.x, DROP_SIZE / 2, worldWidth - DROP_SIZE / 2) / blockSize);
+        row = Math.floor(data.depth / blockSize);
+      } else if (!isInBounds(column, row)) return null;
+      const drop = makeDrop(column, row, data.type, { ...data, id, quantity });
+      drops.set(id, drop);
+      return { ...drop };
+    }
+
+    /**
+     * Vide l'inventaire au point de mort (depth relatif à la surface). Une
+     * seule pile par type conserve toutes les quantités sans créer des
+     * milliers de corps physiques. `quantities` limite un remboursement tardif
+     * aux seuls items qui appartenaient à cette mort, même après réapparition.
+     */
+    function dropInventory(x, depth, data) {
+      if (!Number.isFinite(x) || x < 0 || x > worldWidth || !Number.isFinite(depth)) return [];
+      const settings = data || {};
+      const prefix = String(settings.idPrefix || "local:death:" + inventoryDropSequence++);
+      const result = [];
+      BLOCK_TYPES.forEach((type) => {
+        const requested = settings.quantities ? settings.quantities[type] || 0 : inventory[type];
+        if (!Number.isSafeInteger(requested) || requested <= 0) return;
+        const quantity = Math.min(inventory[type], requested);
+        if (quantity <= 0) return;
+        const drop = addDrop({ ...settings, id: prefix + ":" + type, kind: "death", type, quantity, x, depth });
+        if (drop) {
+          inventory[type] -= quantity;
+          result.push(drop);
+        }
+      });
+      return result;
     }
 
     function applyState(state) {
@@ -371,14 +483,14 @@ window.PixWorldMining = (() => {
         if (!item || typeof item.id !== "string") return;
         const column = Number(item.column);
         const row = Number(item.row);
-        if (!isInBounds(column, row)) return;
-        const type = BLOCKS[item.type] ? item.type : LAYER_TYPES[row];
-        const id = String(item.id).slice(0, 80);
+        const death = item.kind === "death";
+        if (!death && !isInBounds(column, row)) return;
+        const type = BLOCK_TYPES.includes(item.type) ? item.type : death ? null : LAYER_TYPES[row];
+        if (!type) return;
+        const id = item.id.slice(0, 80);
         activeIds.add(id);
-        removed.add(cellKey(column, row));
-        if (!drops.has(id)) {
-          drops.set(id, makeDrop(column, row, type, { id, ownerId: item.ownerId, networked: true }));
-        }
+        if (!death) removed.add(cellKey(column, row));
+        addDrop({ ...item, id, column, row, type, networked: true });
       });
       // Un drop réseau absent de l'état serveur a déjà été ramassé ailleurs.
       drops.forEach((drop, id) => {
@@ -424,7 +536,8 @@ window.PixWorldMining = (() => {
           drop.depth = worldBottom - base - half;
           drop.vy = Math.abs(drop.vy) > 28 ? -Math.abs(drop.vy) * 0.16 : 0;
         }
-        if (drop.age > 45) drops.delete(id);
+        // Le butin de mort reste récupérable, même loin du camp de départ.
+        if (drop.kind !== "death" && drop.age > 45) drops.delete(id);
       });
     }
 
@@ -456,7 +569,7 @@ window.PixWorldMining = (() => {
       const drop = drops.get(String(id));
       if (!drop) return null;
       drops.delete(drop.id);
-      inventory[drop.type] += 1;
+      inventory[drop.type] += drop.quantity;
       return { ...drop };
     }
 
@@ -594,6 +707,16 @@ window.PixWorldMining = (() => {
         ctx.strokeStyle = "rgba(255,255,255,0.58)";
         ctx.lineWidth = 1;
         ctx.strokeRect(-DROP_SIZE / 2 + 0.5, -DROP_SIZE / 2 + 0.5, DROP_SIZE - 1, DROP_SIZE - 1);
+        if (drop.quantity > 1) {
+          ctx.font = "bold 10px monospace";
+          ctx.textAlign = "right";
+          ctx.textBaseline = "bottom";
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = "#182029";
+          ctx.strokeText(String(drop.quantity), DROP_SIZE / 2 + 3, DROP_SIZE / 2 + 4);
+          ctx.fillStyle = "#ffffff";
+          ctx.fillText(String(drop.quantity), DROP_SIZE / 2 + 3, DROP_SIZE / 2 + 4);
+        }
         ctx.restore();
       });
       ctx.restore();
@@ -648,6 +771,7 @@ window.PixWorldMining = (() => {
       blockAt,
       blockType,
       solidAt,
+      traceSolid,
       standingOn: (x, y, w, h, baseY) => standingOn(Number(x), Number(y), Number(w), Number(h), baseY),
       moveEntity,
       canPlaceAt,
@@ -660,6 +784,8 @@ window.PixWorldMining = (() => {
       supportTop,
       landingTop,
       breakBlock,
+      addDrop,
+      dropInventory,
       applyState,
       clearPendingClaims,
       updateDrops,
@@ -684,6 +810,7 @@ window.PixWorldMining = (() => {
 
   return {
     create,
+    segmentRectHit,
     BLOCKS,
     constants: Object.freeze({
       BLOCK_SIZE,

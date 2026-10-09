@@ -4,9 +4,9 @@
  *   npm start            → http://localhost:3000
  *   PORT=8080 npm start  → autre port
  *
- * Le serveur ne fait que relayer les positions : chaque client envoie son
- * état 20 fois par seconde et reçoit la position de tous les autres. Aucune
- * donnée n'est conservée après la déconnexion.
+ * Chaque client envoie son état 20 fois par seconde. Le terrain et les items
+ * (minage et inventaires lâchés à la mort) sont partagés en mémoire jusqu'au
+ * redémarrage du serveur ; les joueurs disparaissent à la déconnexion.
  *
  * Il écoute sur toutes les interfaces : les autres PC du réseau (Wi-Fi,
  * Ethernet…) peuvent donc rejoindre la partie. En production, le service
@@ -228,6 +228,7 @@ function registerPlayer(socket) {
     joined: false, // devient vrai à la réception du "hello" (pseudo choisi)
     messages: 0,
     windowStart: Date.now(),
+    lastDeathDropSerial: -1,
     state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0, hp: 100, d: false },
   };
   players.set(id, player);
@@ -318,13 +319,16 @@ function handleMessage(player, message) {
 
     const key = column + "," + row;
     const dropId = player.id + ":" + serial;
-    // Roche mère incassable : le plancher du monde protège du vide.
-    if (row === MINING.ROWS - 1 || MINED_BLOCKS.has(key) || MINING_DROPS.has(dropId)) {
+    // Un bloc posé prime sur l'historique du terrain naturel : une case
+    // creusée puis rebouchée doit pouvoir être cassée de nouveau.
+    const placedType = PLACED_BLOCKS.get(key);
+    const naturalType = row >= 0 && !MINED_BLOCKS.has(key) ? MINING.LAYER_TYPES[row] : null;
+    const type = placedType || naturalType;
+    // La roche mère reste incassable ; une cellule vide ne donne aucun drop.
+    if (row === MINING.ROWS - 1 || !type || MINING_DROPS.has(dropId)) {
       send(player.socket, { t: "mineRejected", column, row, serial });
       return;
     }
-    const placedType = PLACED_BLOCKS.get(key);
-    const type = placedType || MINING.LAYER_TYPES[row];
     if (placedType) PLACED_BLOCKS.delete(key);
     else MINED_BLOCKS.add(key);
     const drop = { id: dropId, column, row, type, ownerId: player.id };
@@ -359,6 +363,35 @@ function handleMessage(player, message) {
     }
     PLACED_BLOCKS.set(key, type);
     broadcast({ t: "placeBlock", column, row, type, ownerId: player.id, serial });
+    return;
+  }
+
+  if (message.t === "deathDrop") {
+    if (!player.joined) return;
+    const { x, depth, inventory, serial } = message;
+    if (!Number.isFinite(x) || x < 0 || x > WORLD_WIDTH ||
+        !Number.isFinite(depth) || depth < MINING.MIN_ROW * MINING.BLOCK_SIZE - 4000 || depth > MINING.TOTAL_HEIGHT + 600 ||
+        !Number.isSafeInteger(serial) || serial < 0 || serial > 2147483647 ||
+        !inventory || typeof inventory !== "object" || Array.isArray(inventory) ||
+        Object.keys(inventory).some((type) => !BLOCK_TYPES.has(type))) return;
+    const items = [];
+    for (const type of BLOCK_TYPES) {
+      const quantity = inventory[type] == null ? 0 : inventory[type];
+      if (!Number.isSafeInteger(quantity) || quantity < 0 || quantity > 2147483647) return;
+      if (quantity > 0) items.push({ type, quantity });
+    }
+    // Ne jamais recréer un butin confirmé, même si ses piles sont déjà ramassées.
+    if (!items.length || serial <= player.lastDeathDropSerial) return;
+    player.lastDeathDropSerial = serial;
+    const drops = items.map(({ type, quantity }) => ({
+      id: player.id + ":death:" + serial + ":" + type,
+      kind: "death", type, quantity, x, depth,
+      column: Math.floor(x / MINING.BLOCK_SIZE),
+      row: Math.floor(depth / MINING.BLOCK_SIZE),
+      ownerId: player.id,
+    }));
+    drops.forEach((drop) => MINING_DROPS.set(drop.id, drop));
+    broadcast({ t: "deathDrop", ownerId: player.id, serial, drops });
     return;
   }
 
