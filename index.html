@@ -558,6 +558,152 @@
         }
       }
 
+      /* ----- Discussion : T pour écrire, /tp et /kill pour commander ----- */
+
+      .chat {
+        position: absolute;
+        z-index: 6;
+        left: clamp(18px, 4vw, 36px);
+        bottom: clamp(54px, 7vw, 76px);
+        display: grid;
+        width: min(440px, calc(100vw - 260px));
+        gap: 7px;
+        opacity: 0;
+        transform: translateY(6px);
+        transition: opacity 0.22s ease, transform 0.22s ease;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      .chat[hidden] {
+        display: none;
+      }
+
+      /* Derniers messages reçus : le journal reste lisible même fermé. */
+      .chat.is-recent,
+      .chat.is-open {
+        opacity: 1;
+        transform: none;
+      }
+
+      .chat.is-open {
+        pointer-events: auto;
+      }
+
+      .chat-log {
+        display: flex;
+        max-height: 128px;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 3px;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        list-style: none;
+        text-shadow: 0 1px 3px rgb(4 14 26 / 62%);
+      }
+
+      .chat.is-open .chat-log {
+        max-height: 250px;
+      }
+
+      .chat-message {
+        overflow-wrap: anywhere;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.38;
+        animation: chat-in 0.18s ease-out;
+      }
+
+      .chat-message.is-system {
+        color: #ffd68a;
+        font-style: italic;
+      }
+
+      .chat-message.is-offline {
+        opacity: 0.72;
+      }
+
+      .chat-author {
+        font-weight: 900;
+      }
+
+      .chat-author::after {
+        color: rgb(255 255 255 / 58%);
+        content: " · ";
+      }
+
+      .chat-form {
+        display: none;
+        align-items: center;
+        gap: 7px;
+        padding: 6px 6px 6px 11px;
+        border: 1px solid rgb(255 255 255 / 24%);
+        border-radius: 12px;
+        background: rgb(9 26 45 / 84%);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 12px 30px rgb(6 20 36 / 34%);
+      }
+
+      .chat.is-open .chat-form {
+        display: flex;
+      }
+
+      .chat-input {
+        min-width: 0;
+        flex: 1;
+        border: 0;
+        background: none;
+        color: #fff;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        outline: none;
+      }
+
+      .chat-input::placeholder {
+        color: rgb(255 255 255 / 46%);
+      }
+
+      .chat-send {
+        display: grid;
+        width: 28px;
+        height: 25px;
+        flex: none;
+        padding: 0;
+        place-items: center;
+        border: 1px solid rgb(255 255 255 / 24%);
+        border-radius: 8px;
+        background: rgb(255 255 255 / 12%);
+        color: #fff;
+        font: inherit;
+        font-size: 13px;
+        line-height: 1;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+
+      .chat-send:hover {
+        background: rgb(255 255 255 / 24%);
+      }
+
+      .chat-send:focus-visible {
+        outline: 2px solid #ffbf67;
+        outline-offset: 2px;
+      }
+
+      @keyframes chat-in {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
       @media (max-width: 560px) {
         .controls {
           flex-wrap: wrap;
@@ -613,6 +759,12 @@
           display: none;
         }
 
+        /* Sur mobile, la discussion se cale au-dessus de la liste des joueurs. */
+        .chat {
+          width: min(320px, calc(100vw - 32px));
+          bottom: 150px;
+        }
+
         .toasts {
           bottom: auto;
           top: 14px;
@@ -649,6 +801,7 @@
           <span class="control"><kbd>D</kbd> droite</span>
           <span class="control"><kbd class="space">ESPACE</kbd> sauter</span>
           <span class="control"><kbd>X</kbd> attaquer</span>
+          <span class="control"><kbd>T</kbd> chat</span>
           <span class="control"><kbd class="space">CLIC G</kbd> miner</span>
           <span class="control"><kbd class="space">CLIC D</kbd> poser</span>
           <span class="control"><kbd>ESC</kbd> menu</span>
@@ -666,6 +819,24 @@
       </aside>
 
       <div class="toasts" id="toasts" aria-live="polite"></div>
+
+      <!-- Discussion de l'arène : T pour écrire, /tp et /kill pour commander. -->
+      <section class="chat" id="chat" aria-label="Discussion de l'arène" hidden>
+        <ul class="chat-log" id="chat-log" aria-live="polite"></ul>
+        <form class="chat-form" id="chat-form" autocomplete="off">
+          <input
+            class="chat-input"
+            id="chat-input"
+            name="message"
+            type="text"
+            maxlength="140"
+            placeholder='Message…  /tp "Nom" "Nom" · /kill "Nom"'
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <button class="chat-send" id="chat-send" type="submit" title="Envoyer le message" aria-label="Envoyer le message">↵</button>
+        </form>
+      </section>
 
       <aside class="hotbar" id="hotbar" aria-label="Inventaire rapide" hidden>
         <div class="hotbar-heading">
@@ -689,7 +860,7 @@
         <p class="hotbar-hint">MOLETTE · CHOISIR — CLIC DROIT · POSER</p>
       </aside>
 
-      <p class="hint">A/D SE DÉPLACER · ESPACE SAUTE · CLIC GAUCHE · MINER 2 S · CLIC DROIT · POSER</p>
+      <p class="hint">A/D SE DÉPLACER · ESPACE SAUTE · T · DISCUSSION (/TP · /KILL) · CLIC GAUCHE · MINER 2 S · CLIC DROIT · POSER</p>
 
       <section class="game-menu" id="game-menu" role="dialog" aria-modal="true" aria-labelledby="menu-title">
         <form class="menu-shell" id="menu-form" autocomplete="off">

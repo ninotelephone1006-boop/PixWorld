@@ -9,7 +9,8 @@ const server = spawn(process.execPath, ["server/server.js"], {
   stdio: ["ignore", "pipe", "inherit"],
 });
 const clients = [];
-const timeout = setTimeout(() => { server.kill(); process.exit(1); }, 10000);
+const timeout = setTimeout(() => { server.kill(); process.exit(1); }, 20000);
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function connect() {
   const socket = new WebSocket("ws://127.0.0.1:31987/ws");
   clients.push(socket);
@@ -177,9 +178,125 @@ async function until(client, predicate) {
   assert.equal(dw.mining.drops.find((drop) => drop.id === aw.id + ":death:12:stone").quantity, 512);
   assert.equal(dw.mining.drops.find((drop) => drop.id === aw.id + ":death:12:dirt").quantity, 9);
 
+  // ── Discussion : diffusion, nettoyage et commandes (/tp, /kill) ──
+  const chatOf = (client) => client.messages.filter((m) => m.t === "chat");
+
+  a.socket.send(JSON.stringify({ t: "chat", text: "  Salut   la compagnie  " }));
+  const greetingA = await until(a, (m) => m.t === "chat" && m.text === "Salut la compagnie");
+  const greetingB = await until(b, (m) => m.t === "chat" && m.text === "Salut la compagnie");
+  assert.equal(greetingA.name, "Alice");
+  assert.equal(greetingA.id, aw.id);
+  assert.equal(greetingA.c, "ninja");
+  assert.deepEqual(greetingA, greetingB, "la ligne est diffusée à tout le monde, y compris son auteur");
+
+  // Ligne vide ignorée, ligne trop longue coupée à 140 caractères.
+  const beforeEmpty = chatOf(b).length;
+  a.socket.send(JSON.stringify({ t: "chat", text: "   " }));
+  a.socket.send(JSON.stringify({ t: "chat", text: "x".repeat(400) }));
+  const longLine = await until(b, (m) => m.t === "chat" && m.text.startsWith("xxx"));
+  assert.equal(longLine.text.length, 140, "une ligne est limitée à 140 caractères");
+  assert.equal(chatOf(b).length, beforeEmpty + 1, "une ligne vide n'est pas diffusée");
+
+  // /aide ne répond qu'à celle ou celui qui l'a demandé.
+  const beforeHelp = chatOf(b).length;
+  a.socket.send(JSON.stringify({ t: "chat", text: "/aide" }));
+  const help = await until(a, (m) => m.t === "chat" && m.system && m.text.includes("/kill"));
+  assert.equal(help.system, true);
+  await wait(120);
+  assert.equal(chatOf(b).length, beforeHelp, "une demande d'aide n'encombre pas les autres");
+
+  // Pseudo inconnu : message d'erreur pour l'émetteur seulement.
+  const beforeMissing = chatOf(b).length;
+  a.socket.send(JSON.stringify({ t: "chat", text: '/kill "Personne Du Tout"' }));
+  const missing = await until(a, (m) => m.t === "chat" && m.system && m.text.includes("Personne Du Tout"));
+  assert.ok(missing.text.includes("Aucun joueur"));
+  await wait(120);
+  assert.equal(chatOf(b).length, beforeMissing, "une commande en échec ne parle qu'à son auteur");
+
+  // /kill : l'ordre ne part que chez la personne visée, l'annonce partout.
+  a.socket.send(JSON.stringify({ t: "chat", text: "/kill Bob" }));
+  const killOrder = await until(b, (m) => m.t === "kill");
+  assert.equal(killOrder.byId, aw.id);
+  assert.equal(killOrder.byName, "Alice");
+  await wait(120);
+  assert.equal(a.messages.filter((m) => m.t === "kill").length, 0, "les autres joueurs ne reçoivent aucun ordre");
+  assert.equal(c.messages.filter((m) => m.t === "kill").length, 0);
+  const killNews = await until(c, (m) => m.t === "chat" && m.system && m.text.includes("éliminé"));
+  assert.ok(killNews.text.includes("Bob"), "l'annonce nomme la cible");
+
+  // /tp : le client déplacé reçoit la position de la destination.
+  a.socket.send(JSON.stringify({ t: "state", x: 4321, gap: -12, n: 6 }));
+  await until(b, (m) => m.t === "snapshot" && m.p.some((p) => p.id === aw.id && p.n === 6));
+  c.socket.send(JSON.stringify({ t: "chat", text: '/tp "Chloé" "Alice"' }));
+  const tpOrder = await until(c, (m) => m.t === "teleport");
+  assert.equal(tpOrder.x, 4321);
+  assert.equal(tpOrder.gap, -12);
+  assert.equal(tpOrder.toName, "Alice");
+  assert.equal(tpOrder.byName, "Chloé");
+  await wait(120);
+  assert.equal(a.messages.filter((m) => m.t === "teleport").length, 0, "personne d'autre n'est déplacé");
+  const tpNews = await until(a, (m) => m.t === "chat" && m.system && m.text.includes("téléporté"));
+  assert.ok(tpNews.text.includes("Chloé") && tpNews.text.includes("Alice"));
+
+  // Envoyer quelqu'un sur lui-même ne déclenche rien.
+  const beforeSelf = c.messages.filter((m) => m.t === "teleport").length;
+  a.socket.send(JSON.stringify({ t: "chat", text: '/tp "Chloé" "Chloé"' }));
+  const selfTp = await until(a, (m) => m.t === "chat" && m.system && m.text.includes("déjà sur place"));
+  assert.ok(selfTp);
+  await wait(120);
+  assert.equal(c.messages.filter((m) => m.t === "teleport").length, beforeSelf);
+
+  // Pseudos à espaces : avec ou sans guillemets.
+  const e = connect();
+  const ew = await until(e, (m) => m.t === "welcome");
+  e.socket.send(JSON.stringify({ t: "hello", name: "Le Bricoleur", character: "samurai" }));
+  await until(a, (m) => m.t === "join" && m.player.id === ew.id);
+  a.socket.send(JSON.stringify({ t: "chat", text: '/kill "Le Bricoleur"' }));
+  const quotedKill = await until(e, (m) => m.t === "kill");
+  assert.equal(quotedKill.byName, "Alice", "un pseudo à espaces entre guillemets est reconnu");
+  a.socket.send(JSON.stringify({ t: "chat", text: "/kill Le Bricoleur" }));
+  const bareKill = await until(e, (m) => m.t === "kill" && m !== quotedKill);
+  assert.equal(bareKill.byName, "Alice", "un pseudo à espaces reste reconnu sans guillemets");
+
+  // Correspondance exacte d'abord ; un fragment trop vague est signalé.
+  e.socket.send(JSON.stringify({ t: "rename", name: "Bobby", character: "samurai" }));
+  await until(a, (m) => m.t === "renamed" && m.id === ew.id);
+  a.socket.send(JSON.stringify({ t: "chat", text: "/kill ob" }));
+  const ambiguous = await until(a, (m) => m.t === "chat" && m.system && m.text.includes("Plusieurs"));
+  assert.ok(ambiguous.text.includes("Bobby") && ambiguous.text.includes("Bob"), ambiguous.text);
+  a.socket.send(JSON.stringify({ t: "chat", text: "/kill bob" }));
+  const exactKill = await until(b, (m) => m.t === "kill" && m !== killOrder);
+  assert.equal(exactKill.byName, "Alice", "la correspondance exacte l'emporte sur les voisins");
+  await wait(120); // l'annonce publique de l'élimination finit d'arriver
+
+  // Commande inconnue : seule la personne qui l'a tapée est prévenue.
+  const beforeUnknown = chatOf(b).length;
+  a.socket.send(JSON.stringify({ t: "chat", text: "/voler" }));
+  const unknown = await until(a, (m) => m.t === "chat" && m.system && m.text.includes("Commande inconnue"));
+  assert.ok(unknown.text.includes("voler"));
+  await wait(120);
+  assert.equal(chatOf(b).length, beforeUnknown);
+
+  // Anti-flood : huit lignes par fenêtre de 5 secondes, pas plus
+  // (on utilise un joueur frais pour ne pas compter les lignes déjà envoyées).
+  const beforeFlood = chatOf(b).filter((m) => !m.system && m.text === "flood").length;
+  for (let index = 0; index < 12; index++) e.socket.send(JSON.stringify({ t: "chat", text: "flood" }));
+  await wait(250);
+  const flooded = chatOf(b).filter((m) => !m.system && m.text === "flood").length;
+  assert.equal(flooded - beforeFlood, 8, "les lignes surnuméraires sont ignorées");
+
+  // Curseur relayé : envoyé en repère monde, effacé quand la souris sort.
+  a.socket.send(JSON.stringify({ t: "state", cx: 4600, cy: 240, n: 7 }));
+  const withCursor = await until(b, (m) => m.t === "snapshot" && m.p.some((p) => p.id === aw.id && p.n === 7));
+  assert.equal(withCursor.p.find((p) => p.id === aw.id).cx, 4600);
+  assert.equal(withCursor.p.find((p) => p.id === aw.id).cy, 240);
+  a.socket.send(JSON.stringify({ t: "state", cx: null, cy: null, n: 8 }));
+  const withoutCursor = await until(b, (m) => m.t === "snapshot" && m.p.some((p) => p.id === aw.id && p.n === 8));
+  assert.equal(withoutCursor.p.find((p) => p.id === aw.id).cx, null, "sans curseur, rien n'est annoncé");
+
   a.socket.close();
   await until(b, (m) => m.t === "leave" && m.id === aw.id);
-  console.log("server.test.js : arène, blocs reposés cassables, butin, arrivées tardives et ramassage unique : ok");
+  console.log("server.test.js : arène, blocs reposés cassables, butin, arrivées tardives, ramassage unique, discussion, /tp, /kill et curseurs : ok");
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {
   clients.forEach((client) => client.terminate());
   server.kill();

@@ -19,6 +19,12 @@
  * src/scenery.js.
  *
  * Tous les joueurs rejoignent le serveur WebSocket du site : voir src/net.js.
+ *
+ * La touche T ouvre la discussion : les lignes sont diffusées à toute l'arène
+ * et les commandes /tp (téléporter un joueur sur un autre) et /kill (mettre
+ * K.O.) sont résolues par le serveur, qui n'avertit que le client concerné.
+ * Le curseur de la souris est partagé de la même façon : chacun voit où les
+ * autres visent, avec une flèche à sa couleur.
  */
 (() => {
   "use strict";
@@ -59,6 +65,10 @@
   const playersRename = document.querySelector("#players-rename");
   const soundToggle = document.querySelector("#sound-toggle");
   const toasts = document.querySelector("#toasts");
+  const chatPanel = document.querySelector("#chat");
+  const chatLog = document.querySelector("#chat-log");
+  const chatForm = document.querySelector("#chat-form");
+  const chatInput = document.querySelector("#chat-input");
   const hotbar = document.querySelector("#hotbar");
   const hotbarSlots = Array.from(document.querySelectorAll(".hotbar-slot"));
   const hotbarCounts = {
@@ -188,6 +198,17 @@
   const SEND_INTERVAL = 0.05; // 20 envois de position par seconde
   const SPAWN_X = 112;
 
+  // ─────────────────────── Discussion et curseurs distants ───────────────────────
+  const CHAT_MAX_LENGTH = 140; // longueur d'une ligne, comme côté serveur
+  const CHAT_HISTORY = 40; // lignes conservées à l'écran
+  const CHAT_IDLE_MS = 5200; // le journal reste visible après le dernier message
+  // Une couleur par joueur : le curseur des autres se repère d'un coup d'œil,
+  // même entre deux héros identiques.
+  const CURSOR_COLORS = [
+    "#ffd166", "#7ee39a", "#8ecbff", "#ff8a5c",
+    "#c792ea", "#ff6b73", "#5ce1e6", "#f78fb3",
+  ];
+
   const player = {
     x: SPAWN_X,
     y: 0,
@@ -235,7 +256,7 @@
   let selectedCharacter = "ninja";
   let lastPanelHp = MAX_HP;
   const projectiles = [];
-  const aimPointer = { x: 0, inside: false }; // visée indépendante des clics de minage / du HUD
+  const aimPointer = { x: 0, y: 0, inside: false }; // visée indépendante des clics de minage / du HUD
   const miningPointer = { x: 0, y: 0, inside: false, down: false, pointerId: null };
   let miningTargetKey = null;
   let miningElapsed = 0;
@@ -258,6 +279,9 @@
   let playing = false;
   let hasJoined = false;
   let panelDirty = true;
+  const chatMessages = [];
+  let chatOpen = false;
+  let chatIdleTimer = null;
 
   function stored(key, fallback) {
     try {
@@ -348,6 +372,20 @@
   /** Centre horizontal (monde) et vertical d'un joueur, pour les effets. */
   function playerCenter() {
     return { x: player.x + player.width / 2, y: player.y + player.height / 2 };
+  }
+
+  /** Curseur local en repère monde (null si la souris a quitté la fenêtre). */
+  function cursorWorldPoint() {
+    if (!aimPointer.inside) return null;
+    return { x: aimPointer.x + camX, y: aimPointer.y + camY };
+  }
+
+  /** Une teinte stable par joueur : son curseur se reconnaît au premier coup d'œil. */
+  function cursorColorFor(peer) {
+    let sum = 7;
+    const id = String(peer.id == null ? "" : peer.id);
+    for (let index = 0; index < id.length; index++) sum = (sum * 31 + id.charCodeAt(index)) % 99991;
+    return CURSOR_COLORS[sum % CURSOR_COLORS.length];
   }
 
   function peerCenter(peer) {
@@ -597,6 +635,132 @@
     });
   }
 
+  // ───────────────────────────── Discussion ─────────────────────────────
+
+  /** Nettoie une ligne tapée : mêmes règles que le serveur. */
+  function cleanChatText(raw) {
+    return String(raw == null ? "" : raw)
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, CHAT_MAX_LENGTH);
+  }
+
+  /** Le journal reste affiché quelques secondes après le dernier message. */
+  function markChatActivity() {
+    chatPanel.classList.add("is-recent");
+    clearTimeout(chatIdleTimer);
+    chatIdleTimer = setTimeout(() => chatPanel.classList.remove("is-recent"), CHAT_IDLE_MS);
+  }
+
+  function addChatMessage(entry) {
+    chatMessages.push(entry);
+    if (chatMessages.length > CHAT_HISTORY) chatMessages.shift();
+
+    const item = document.createElement("li");
+    item.className = "chat-message" +
+      (entry.system ? " is-system" : "") +
+      (entry.offline ? " is-offline" : "");
+    if (entry.system) {
+      item.textContent = entry.text;
+    } else {
+      const author = document.createElement("span");
+      author.className = "chat-author";
+      author.style.color = entry.color || "#ffffff";
+      author.textContent = entry.name;
+      const body = document.createElement("span");
+      body.className = "chat-text";
+      body.textContent = entry.text;
+      item.append(author, body);
+    }
+    chatLog.append(item);
+    while (chatLog.children.length > CHAT_HISTORY) chatLog.firstElementChild.remove();
+    markChatActivity();
+  }
+
+  /** Le clic a-t-il eu lieu dans la discussion (plutôt que dans le monde) ? */
+  function isInsideChat(target) {
+    let node = target;
+    while (node) {
+      if (node === chatPanel) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  function openChat() {
+    if (!playing || chatOpen) return;
+    chatOpen = true;
+    chatInput.value = "";
+    chatPanel.classList.add("is-open");
+    // On lâche les touches : le personnage s'arrête pendant la saisie.
+    keys.clear();
+    resetMiningInput();
+    sfx("uiSelect", { volume: 0.5 });
+    chatInput.focus({ preventScroll: true });
+  }
+
+  function closeChat(silent) {
+    if (!chatOpen) return;
+    chatOpen = false;
+    chatInput.value = "";
+    chatPanel.classList.remove("is-open");
+    chatInput.blur();
+    if (!silent) sfx("uiBack", { volume: 0.5 });
+  }
+
+  /** La discussion n'apparaît que pendant la partie. */
+  function setChatVisible(visible) {
+    chatPanel.hidden = !visible;
+    if (visible) return;
+    closeChat(true);
+    clearTimeout(chatIdleTimer);
+    chatPanel.classList.remove("is-recent");
+  }
+
+  /**
+   * Envoie une ligne. En ligne, le serveur la diffuse à tout le monde et
+   * exécute les commandes (/tp, /kill) ; hors ligne, on se contente de
+   * l'afficher, sans faire croire qu'un autre joueur l'a reçue.
+   */
+  function sendChatMessage(raw) {
+    const text = cleanChatText(raw);
+    if (!text) return;
+    const connected = net && net.mode === "online" && hasJoined && myId;
+    if (connected) {
+      net.say(text);
+      sfx("uiConfirm", { volume: 0.55 });
+      return;
+    }
+    if (text.startsWith("/")) {
+      addChatMessage({ system: true, text: "Les commandes /tp et /kill demandent l'arène en ligne." });
+      sfx("uiError", { volume: 0.5 });
+      return;
+    }
+    addChatMessage({
+      name: identity.name,
+      text,
+      color: accentFor(identity.character),
+      self: true,
+      offline: true,
+    });
+    sfx("uiConfirm", { volume: 0.55 });
+  }
+
+  /** Ligne reçue du serveur : message d'un joueur ou information système. */
+  function handleChatMessage(message) {
+    if (message.system) {
+      addChatMessage({ system: true, text: cleanChatText(message.text) });
+      return;
+    }
+    addChatMessage({
+      name: cleanName(message.name),
+      text: cleanChatText(message.text),
+      color: accentFor(cleanCharacter(message.c || message.character)),
+      self: message.id === myId,
+    });
+  }
+
   function syncMenuFromIdentity() {
     menuNameInput.value = identity.name;
     selectedCharacter = cleanCharacter(identity.character);
@@ -607,6 +771,7 @@
     menuMode = mode === "pause" ? "pause" : "start";
     playing = false;
     setHotbarVisible(false);
+    setChatVisible(false);
     resetMiningInput();
     player.velocityX = 0;
     keys.clear();
@@ -675,6 +840,7 @@
     hideMenu();
     playing = true;
     setHotbarVisible(true);
+    setChatVisible(true);
     updateHotbar();
     keys.clear();
     panelDirty = true;
@@ -691,6 +857,7 @@
     hideMenu();
     playing = true;
     setHotbarVisible(true);
+    setChatVisible(true);
     updateHotbar();
     keys.clear();
     panelDirty = true;
@@ -740,6 +907,7 @@
       hideMenu();
       playing = true;
       setHotbarVisible(true);
+      setChatVisible(true);
       updateHotbar();
       keys.clear();
       panelDirty = true;
@@ -756,6 +924,16 @@
     openMenu("pause");
   });
   menuNameInput.addEventListener("input", () => sfx("uiType", { volume: 0.8 }));
+
+  // Discussion : Envoie la ligne, puis rend la main au jeu (Échap ferme aussi).
+  chatForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const text = chatInput.value;
+    chatInput.value = "";
+    closeChat();
+    sendChatMessage(text);
+  });
+  chatInput.addEventListener("input", () => sfx("uiType", { volume: 0.5 }));
   if (menuServerCopy) menuServerCopy.addEventListener("click", copyServerAddress);
   [menuClose, menuHome, playersRename, menuForm.querySelector(".menu-primary")].forEach((button) => {
     if (button) button.addEventListener("pointerenter", () => sfx("uiHover", { volume: 0.5 }));
@@ -887,6 +1065,20 @@
         (message.p || []).forEach(updatePeerState);
         break;
       }
+      case "chat": {
+        handleChatMessage(message);
+        break;
+      }
+      case "teleport": {
+        // Le serveur nous envoie la position d'un autre joueur : à nous de
+        // nous y placer (le combat reste simulé côté client).
+        receiveTeleport(message);
+        break;
+      }
+      case "kill": {
+        receiveKillOrder(message);
+        break;
+      }
       case "disconnected": {
         others.clear();
         mining.clearPendingClaims();
@@ -937,6 +1129,8 @@
       meleeHits: null,
       shotTimer: -1,
       shotStyle: null,
+      cursor: null, // dernier curseur connu (repère monde)
+      cursorDraw: null, // position lissée pour l'affichage
       rx: player.x,
       ry: groundAt(centerOf(player.x)) - player.height,
       animTime: 0,
@@ -1005,6 +1199,21 @@
       if (dead) onPeerKnockedOut(peer);
       else onPeerRespawned(peer);
       panelDirty = true;
+    }
+
+    // Curseur du joueur distant : null quand sa souris quitte la fenêtre.
+    if (state.cx != null && state.cy != null &&
+        Number.isFinite(Number(state.cx)) && Number.isFinite(Number(state.cy))) {
+      const cx = clamp(Number(state.cx), -4000, WORLD_WIDTH + 4000);
+      const cy = clamp(Number(state.cy), -12000, 12000);
+      if (peer.cursor) {
+        peer.cursor.x = cx;
+        peer.cursor.y = cy;
+      } else {
+        peer.cursor = { x: cx, y: cy };
+      }
+    } else {
+      peer.cursor = null;
     }
 
     // Le compteur évite de rejouer les effets d'attaque reçus dans chaque snapshot.
@@ -1279,6 +1488,52 @@
     panelDirty = true;
   }
 
+  /** Recadre la caméra d'un coup (téléportation), sans long travelling. */
+  function snapCamera() {
+    camX = clamp(player.x + player.width / 2 - width / 2, 0, Math.max(0, WORLD_WIDTH - width));
+  }
+
+  /**
+   * Ordre du serveur : nous rejoignons un autre joueur (commande /tp).
+   * `gap` est la hauteur au-dessus du sol de la destination, pour atterrir
+   * exactement où il se trouve (en l'air ou au fond d'un trou).
+   */
+  function receiveTeleport(message) {
+    const x = clamp(Number(message.x) || SPAWN_X, 0, WORLD_WIDTH - player.width);
+    const gap = clamp(Number(message.gap) || 0, -mining.totalHeight - 400, 1200);
+    player.x = x;
+    player.y = groundAt(centerOf(x)) - player.height - gap;
+    player.velocityX = 0;
+    player.velocityY = 0;
+    player.knockback = 0;
+    player.grounded = true;
+    player.airTime = 0;
+    snapCamera();
+    const me = playerCenter();
+    fx.respawn(me.x, player.y + player.height, accentFor(identity.character));
+    fx.text(me.x, player.y - 14, "Téléportation !", { color: "#ffe08a", size: 17, vy: -38, duration: 1.1 });
+    sfx("respawn", { important: true });
+    const destination = message.toName ? cleanName(message.toName) : "";
+    const author = message.byName ? cleanName(message.byName) : "";
+    if (destination) {
+      toast(author && author !== identity.name
+        ? author + " t'a téléporté sur " + destination + "."
+        : "Téléporté sur " + destination + ".", true);
+    }
+  }
+
+  /** Ordre du serveur : nous sommes mis K.O. à distance (commande /kill). */
+  function receiveKillOrder(message) {
+    if (!playing || player.deadTime > 0) return;
+    // La commande ne s'occupe pas de l'invulnérabilité de réapparition.
+    player.invulnerable = 0;
+    player.timeSinceDamage = 0;
+    player.hp = 0;
+    startDeath(characterFor(identity.character));
+    const author = message.byName ? cleanName(message.byName) : "";
+    if (author && author !== identity.name) toast(author + " t'a éliminé.", true);
+  }
+
   function projectileTargetHit(projectile, x0, x1, x, y) {
     const margin = 8;
     return window.PixWorldMining.segmentRectHit(x0, projectile.y, x1, projectile.y, {
@@ -1387,7 +1642,10 @@
     const y = event.clientY - rect.top;
     aimPointer.inside = Number.isFinite(x) && Number.isFinite(y) &&
       x >= 0 && x <= rect.width && y >= 0 && y <= rect.height;
-    if (aimPointer.inside) aimPointer.x = x;
+    if (aimPointer.inside) {
+      aimPointer.x = x;
+      aimPointer.y = y;
+    }
     updatePlayerFacing();
   }
 
@@ -1637,6 +1895,8 @@
     sendTimer += delta;
     if (net && hasJoined && sendTimer >= SEND_INTERVAL) {
       sendTimer = 0;
+      // Le curseur part en repère monde : chacun voit où les autres visent.
+      const cursor = cursorWorldPoint();
       net.sendState({
         x: Math.round(player.x),
         gap: Math.round(groundAt(centerOf(player.x)) - (player.y + player.height)),
@@ -1649,6 +1909,8 @@
         n: player.attackSerial,
         hp: Math.round(player.hp),
         d: player.deadTime > 0,
+        cx: cursor ? Math.round(cursor.x) : null,
+        cy: cursor ? Math.round(cursor.y) : null,
       });
     }
   }
@@ -1821,6 +2083,15 @@
       peer.rx += (peer.x - peer.rx) * Math.min(1, delta * 14);
       const targetY = groundAt(centerOf(peer.x)) - player.height - peer.gap;
       peer.ry += (targetY - peer.ry) * Math.min(1, delta * 14);
+
+      // Curseur distant : lissé comme le personnage, pour rester fluide à 20 Hz.
+      if (peer.cursor) {
+        if (!peer.cursorDraw) peer.cursorDraw = { x: peer.cursor.x, y: peer.cursor.y };
+        peer.cursorDraw.x += (peer.cursor.x - peer.cursorDraw.x) * Math.min(1, delta * 20);
+        peer.cursorDraw.y += (peer.cursor.y - peer.cursorDraw.y) * Math.min(1, delta * 20);
+      } else {
+        peer.cursorDraw = null;
+      }
 
       const character = characterFor(peer.character);
       const center = peerCenter(peer);
@@ -2496,6 +2767,75 @@
   }
 
   /**
+   * Curseur des autres joueurs : une flèche à leur couleur, avec leur pseudo,
+   * pour voir en direct où ils visent sur l'écran.
+   */
+  function drawPeerCursors() {
+    others.forEach((peer) => {
+      const cursor = peer.cursorDraw;
+      if (!cursor || peer.dead) return;
+      const screenX = cursor.x - camX;
+      const screenY = cursor.y - camY;
+      // Hors champ : inutile de coller une flèche au bord, le joueur a déjà
+      // son repère (flèche de hors-écran) de son côté de l'écran.
+      if (screenX < -20 || screenX > width + 20 || screenY < -20 || screenY > height + 20) return;
+
+      const color = cursorColorFor(peer);
+      ctx.save();
+      ctx.translate(Math.round(screenX), Math.round(screenY));
+
+      // Halo doux pour se détacher du décor, quelle que soit la biome.
+      ctx.beginPath();
+      ctx.arc(0, 0, 13, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(6, 18, 34, 0.22)";
+      ctx.fill();
+
+      // Flèche de souris classique : pointe en haut à gauche, queue en bas.
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, 16.5);
+      ctx.lineTo(4.3, 12.5);
+      ctx.lineTo(7.6, 19.8);
+      ctx.lineTo(10.2, 18.6);
+      ctx.lineTo(6.9, 11.4);
+      ctx.lineTo(12, 11);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = "rgba(5, 16, 30, 0.85)";
+      ctx.stroke();
+      ctx.restore();
+
+      drawCursorLabel(peer.name, color, Math.round(screenX) + 13, Math.round(screenY) + 17);
+    });
+  }
+
+  /** Petite étiquette du curseur : même couleur que la flèche. */
+  function drawCursorLabel(text, color, x, y) {
+    ctx.font = "800 10px " + FONT_STACK;
+    const textWidth = ctx.measureText(text).width;
+    const boxWidth = Math.round(textWidth + 12);
+    const boxHeight = 15;
+    const boxX = clamp(x, 4, Math.max(4, width - boxWidth - 4));
+    const boxY = clamp(y, 4, Math.max(4, height - boxHeight - 4));
+
+    ctx.save();
+    roundRectPath(boxX, boxY, boxWidth, boxHeight, 7);
+    ctx.fillStyle = "rgba(8, 24, 42, 0.74)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.18)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = color;
+    ctx.fillText(text, boxX + 6, boxY + boxHeight / 2 + 0.5);
+    ctx.restore();
+  }
+
+  /**
    * Touffe posée sur le sol (tileX : bord gauche de sa tuile à l'écran).
    * Au repos, elle est dessinée d'un seul tenant. Quand un personnage vient
    * de la traverser, elle est dessinée ligne par ligne : la pointe se décale
@@ -2625,6 +2965,8 @@
     );
     drawProjectiles();
     fx.draw(ctx, camX);
+    // Curseurs des autres joueurs, par-dessus le monde.
+    drawPeerCursors();
     ctx.restore(); // fin du décalage vertical du monde
 
     scenery.drawAmbient(ctx);
@@ -2674,6 +3016,11 @@
     }
     if (event.code === "Escape" || keyLabel === "escape") {
       event.preventDefault();
+      // Échap referme d'abord la discussion, sans ouvrir le menu pause.
+      if (chatOpen) {
+        closeChat();
+        return;
+      }
       if (playing) {
         sfx("uiPause");
         openMenu("pause");
@@ -2682,12 +3029,24 @@
       }
       return;
     }
+    // Pendant la saisie, le clavier appartient à la discussion : on ne court
+    // pas, on ne saute pas et on n'attaque pas en écrivant un message.
+    if (chatOpen) {
+      if (event.code === "Space") event.preventDefault();
+      return;
+    }
     if ((event.code === "KeyM" || keyLabel === "m") && !event.repeat && !isTypingTarget(event.target)) {
       event.preventDefault();
       toggleMute();
       return;
     }
     if (!playing) return;
+    // T ouvre la discussion ; Entrée et Échap sont gérés par le formulaire.
+    if ((event.code === "KeyT" || keyLabel === "t") && !event.repeat && !isTypingTarget(event.target)) {
+      event.preventDefault();
+      openChat();
+      return;
+    }
     if (/^[1-3]$/.test(event.key)) {
       event.preventDefault();
       selectHotbar(Number(event.key) - 1, true);
@@ -2729,6 +3088,7 @@
   window.addEventListener("blur", () => {
     keys.clear();
     aimPointer.inside = false;
+    aimPointer.y = 0;
     miningPointer.inside = false;
     resetMiningInput();
   });
@@ -2745,7 +3105,7 @@
 
   // Clic gauche sur un bloc : minage continu (0,2 s). Ailleurs, il reste une attaque.
   window.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0 || !playing || event.target !== canvas) return;
+    if (event.button !== 0 || !playing || chatOpen || event.target !== canvas) return;
     event.preventDefault();
     updateMiningPointer(event);
     const target = currentMiningTarget();
@@ -2779,17 +3139,24 @@
     if (event.target === canvas) event.preventDefault();
   });
   window.addEventListener("pointerdown", (event) => {
-    if (event.button !== 2 || !playing || event.target !== canvas) return;
+    if (event.button !== 2 || !playing || chatOpen || event.target !== canvas) return;
     event.preventDefault();
     updateMiningPointer(event);
     tryPlaceBlock();
+  });
+
+  // Un clic hors de la discussion la referme (comme Échap). Enregistré après
+  // les commandes du jeu : ce clic-là rend simplement la main au jeu.
+  window.addEventListener("pointerdown", (event) => {
+    if (!chatOpen || isInsideChat(event.target)) return;
+    closeChat();
   });
 
   hotbarSlots.forEach((slot, index) => {
     slot.addEventListener("click", () => selectHotbar(index, true));
   });
   window.addEventListener("wheel", (event) => {
-    if (!playing || hotbar.hidden) return;
+    if (!playing || chatOpen || hotbar.hidden) return;
     event.preventDefault();
     const direction = event.deltaY > 0 ? 1 : -1;
     selectHotbar(selectedHotbarSlot + direction, true);
@@ -2830,5 +3197,12 @@
     drops: () => mining.getDrops(),
     projectiles: () => projectiles.map(({ style, x, y, owner }) => ({ style, x, y, owner })),
     peers: () => Array.from(others.values(), ({ id, lastHitByUsAt }) => ({ id, lastHitByUsAt })),
+    cursors: () => Array.from(others.values(), (peer) => ({
+      id: peer.id,
+      cursor: peer.cursor ? { x: peer.cursor.x, y: peer.cursor.y } : null,
+    })),
+    get chat() {
+      return { open: chatOpen, messages: chatMessages.slice() };
+    },
   };
 })();

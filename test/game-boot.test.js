@@ -310,6 +310,13 @@ function buildDocument() {
       element("button", { class: "hotbar-slot", "data-slot": "2", "data-block": "stone" }),
     ]),
   ]);
+  const chat = element("section", { id: "chat", class: "chat", hidden: "" }, [
+    element("ul", { id: "chat-log", class: "chat-log" }),
+    element("form", { id: "chat-form", class: "chat-form" }, [
+      element("input", { id: "chat-input", class: "chat-input", type: "text" }),
+      element("button", { id: "chat-send", class: "chat-send", type: "submit" }),
+    ]),
+  ]);
   const menu = element("section", { id: "game-menu", class: "game-menu" }, [
     element("form", { id: "menu-form" }, [
       element("section", { class: "menu-world" }, [
@@ -344,6 +351,7 @@ function buildDocument() {
     element("section", { class: "hud" }, [element("button", { id: "sound-toggle" })]),
     players,
     element("div", { id: "toasts", class: "toasts" }),
+    chat,
     hotbar,
     menu,
   ]));

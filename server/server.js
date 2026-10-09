@@ -8,6 +8,11 @@
  * (minage et inventaires lâchés à la mort) sont partagés en mémoire jusqu'au
  * redémarrage du serveur ; les joueurs disparaissent à la déconnexion.
  *
+ * La discussion passe par le même canal : le serveur nettoie les lignes, les
+ * diffuse et exécute les commandes /tp (téléporter un joueur sur un autre) et
+ * /kill (mettre un joueur K.O.). Il n'avertit que le client concerné, qui joue
+ * l'effet chez lui, comme le reste du combat.
+ *
  * Il écoute sur toutes les interfaces : les autres PC du réseau (Wi-Fi,
  * Ethernet…) peuvent donc rejoindre la partie. En production, le service
  * public HTTPS héberge le jeu et relaie les WebSockets sur la même origine.
@@ -29,6 +34,9 @@ const MAX_PLAYERS = 24;
 const MAX_MESSAGE_BYTES = 4096;
 const MAX_MESSAGES_PER_SECOND = 80;
 const IDLE_TIMEOUT_MS = 20000;
+const CHAT_MAX_LENGTH = 140; // longueur d'une ligne de discussion
+const CHAT_BURST = 8; // messages de discussion autorisés…
+const CHAT_WINDOW_MS = 5000; // …par fenêtre glissante
 const worldContext = { window: {} };
 vm.runInNewContext(fs.readFileSync(path.join(ROOT, "src/world.js"), "utf8"), worldContext);
 const WORLD_WIDTH = worldContext.window.PixWorldWorld.create("pixworld").width;
@@ -148,6 +156,175 @@ function cleanCharacter(raw) {
   return CHARACTER_IDS.has(raw) ? raw : "ninja";
 }
 
+/** Une ligne de discussion : caractères de contrôle retirés, longueur bornée. */
+function cleanChatText(raw) {
+  return String(raw == null ? "" : raw)
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, CHAT_MAX_LENGTH);
+}
+
+/** Pseudo tapé dans une commande : mêmes règles que cleanName, en minuscules. */
+function normalizeName(raw) {
+  return String(raw == null ? "" : raw)
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 14)
+    .toLowerCase();
+}
+
+function displayName(raw) {
+  return String(raw == null ? "" : raw)
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 20);
+}
+
+/**
+ * Découpe les arguments d'une commande en respectant les guillemets :
+ * /tp "nom du joueur" "autre joueur" donne deux arguments.
+ */
+function parseCommandArguments(text) {
+  const args = [];
+  const pattern = /"([^"]*)"|«([^»]*)»|'([^']*)'|(\S+)/g;
+  let match;
+  while ((match = pattern.exec(text))) {
+    args.push(match[1] != null ? match[1] : match[2] != null ? match[2] : match[3] != null ? match[3] : match[4]);
+  }
+  return args;
+}
+
+/** Joueurs dont le pseudo correspond : correspondance exacte, puis préfixe, puis fragment. */
+function findByName(query) {
+  const needle = normalizeName(query);
+  if (!needle) return { needle, matches: [] };
+  const joined = [];
+  players.forEach((player) => {
+    if (player.joined) joined.push(player);
+  });
+  const stages = [
+    joined.filter((player) => player.name.toLowerCase() === needle),
+    joined.filter((player) => player.name.toLowerCase().startsWith(needle)),
+    joined.filter((player) => player.name.toLowerCase().includes(needle)),
+  ];
+  for (const stage of stages) if (stage.length) return { needle, matches: stage };
+  return { needle, matches: [] };
+}
+
+/** Ligne d'information affichée dans la discussion de tout le monde (ou d'un seul joueur). */
+function systemChat(text, onlyId) {
+  const message = { t: "chat", system: true, text: cleanChatText(text) };
+  if (onlyId === undefined) {
+    broadcast(message);
+    return;
+  }
+  const player = players.get(onlyId);
+  if (player) send(player.socket, message);
+}
+
+/** Anti-flood de la discussion : quelques messages par fenêtre glissante. */
+function chatAllowed(player) {
+  const now = Date.now();
+  player.chatTimes = (player.chatTimes || []).filter((time) => now - time < CHAT_WINDOW_MS);
+  if (player.chatTimes.length >= CHAT_BURST) return false;
+  player.chatTimes.push(now);
+  return true;
+}
+
+const COMMAND_HELP = [
+  'Commandes : /tp "joueur" "destination" · /kill "joueur" · /aide',
+  "Astuce : un pseudo avec des espaces s'écrit entre guillemets.",
+];
+
+function reportLookup(player, query, matches) {
+  if (!matches.length) {
+    systemChat("Aucun joueur ne s'appelle « " + displayName(query) + " ».", player.id);
+    return;
+  }
+  systemChat(
+    "Plusieurs joueurs correspondent à « " + displayName(query) + " » : " +
+      matches.slice(0, 4).map((match) => match.name).join(", ") + ".",
+    player.id,
+  );
+}
+
+/**
+ * Commandes tapées dans la discussion. Le serveur résout les pseudos, puis
+ * n'avertit que la personne concernée : c'est son client qui joue l'effet
+ * (téléportation ou K.O.), comme le reste du combat.
+ */
+function handleCommand(player, raw) {
+  const args = parseCommandArguments(raw.slice(1));
+  const command = (args.shift() || "").toLowerCase();
+
+  if (command === "aide" || command === "help") {
+    COMMAND_HELP.forEach((line) => systemChat(line, player.id));
+    return;
+  }
+
+  if (command === "kill") {
+    const query = args.join(" ").trim();
+    if (!query) {
+      systemChat('Usage : /kill "nom du joueur"', player.id);
+      return;
+    }
+    const { matches } = findByName(query);
+    if (matches.length !== 1) {
+      reportLookup(player, query, matches);
+      return;
+    }
+    const target = matches[0];
+    send(target.socket, { t: "kill", byId: player.id, byName: player.name });
+    systemChat(player.name + " a éliminé " + target.name + ".");
+    return;
+  }
+
+  if (command === "tp") {
+    if (!args.length) {
+      systemChat('Usage : /tp "joueur" "destination" — ou /tp "destination" pour y aller toi-même.', player.id);
+      return;
+    }
+    let target = player;
+    let destinationQuery;
+    if (args.length === 1) {
+      destinationQuery = args[0];
+    } else {
+      const found = findByName(args[0]);
+      if (found.matches.length !== 1) {
+        reportLookup(player, args[0], found.matches);
+        return;
+      }
+      target = found.matches[0];
+      destinationQuery = args.slice(1).join(" ");
+    }
+    const destination = findByName(destinationQuery);
+    if (destination.matches.length !== 1) {
+      reportLookup(player, destinationQuery, destination.matches);
+      return;
+    }
+    const destinationPlayer = destination.matches[0];
+    if (destinationPlayer.id === target.id) {
+      systemChat(target.name + " est déjà sur place.", player.id);
+      return;
+    }
+    send(target.socket, {
+      t: "teleport",
+      x: destinationPlayer.state.x,
+      gap: destinationPlayer.state.gap,
+      byId: player.id,
+      byName: player.name,
+      toName: destinationPlayer.name,
+    });
+    systemChat(player.name + " a téléporté " + target.name + " sur " + destinationPlayer.name + ".");
+    return;
+  }
+
+  systemChat("Commande inconnue « /" + displayName(command) + " » — /aide pour la liste.", player.id);
+}
+
 function send(socket, message) {
   if (socket.destroyed || !socket.writable) return;
   try {
@@ -229,7 +406,8 @@ function registerPlayer(socket) {
     messages: 0,
     windowStart: Date.now(),
     lastDeathDropSerial: -1,
-    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0, hp: 100, d: false },
+    chatTimes: [],
+    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0, hp: 100, d: false, cx: null, cy: null },
   };
   players.set(id, player);
 
@@ -304,7 +482,23 @@ function handleMessage(player, message) {
       n: Math.floor(clampNumber(message.n, 0, 2147483647, player.state.n || 0)),
       hp: Math.round(clampNumber(message.hp, 0, 100, player.state.hp == null ? 100 : player.state.hp)),
       d: Boolean(message.d), // K.O. en cours : les autres jouent l'animation
+      // Curseur en repère monde (null : la souris a quitté la fenêtre).
+      cx: message.cx == null ? null : Math.round(clampNumber(message.cx, -4000, WORLD_WIDTH + 4000, 0)),
+      cy: message.cy == null ? null : Math.round(clampNumber(message.cy, -12000, 12000, 0)),
     };
+    return;
+  }
+
+  if (message.t === "chat") {
+    if (!player.joined) return;
+    const text = cleanChatText(message.text);
+    if (!text) return;
+    if (text.startsWith("/")) {
+      handleCommand(player, text);
+      return;
+    }
+    if (!chatAllowed(player)) return;
+    broadcast({ t: "chat", id: player.id, name: player.name, c: player.character, text });
     return;
   }
 

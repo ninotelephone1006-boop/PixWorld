@@ -153,6 +153,25 @@ La liste des événements et de leurs variantes est décrite dans `src/sfx-libra
 - Un message s'affiche brièvement quand quelqu'un arrive ou part, ou quand tu es K.O.
 - Si un joueur sort de l'écran, une **flèche à son nom** indique de quel côté il se trouve.
 - Le crayon `✎` de la liste rouvre le menu pour changer de pseudo ou de héros.
+- Tu vois le **curseur des autres joueurs** en direct : une flèche à leur couleur, avec leur pseudo, exactement là où ils visent à l'écran.
+
+### Discussion et commandes
+
+`T` ouvre la discussion en bas à gauche. `Entrée` envoie, `Échap` (ou un clic
+dans le monde) referme et rend la main au jeu ; le journal reste affiché
+quelques secondes après le dernier message.
+
+| Commande | Effet |
+| --- | --- |
+| `/tp "joueur" "destination"` | téléporte le premier joueur sur le second |
+| `/tp "destination"` | t'y téléporte toi-même |
+| `/kill "joueur"` | met le joueur K.O. (il lâche son inventaire et réapparaît au camp) |
+| `/aide` | rappelle la liste des commandes |
+
+Les pseudos avec des espaces s'écrivent entre guillemets (`/kill "Le Bricoleur"`) ;
+à défaut, la recherche accepte un début ou un fragment de pseudo, et signale
+les homonymes. C'est le serveur qui résout les noms : il n'avertit que le
+client concerné, qui joue l'effet chez lui — comme le reste du combat.
 
 ### Connexion automatique
 
@@ -170,6 +189,7 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `D` ou flèche droite : aller à droite
 - `Espace` : sauter
 - `X` : lancer l'attaque du héros
+- `T` : ouvrir la discussion (`Entrée` envoie, `Échap` referme, `/tp` et `/kill` commandent l'arène)
 - Clic gauche sur un bloc : miner (maintenir 2 secondes) ; clic dans le vide : attaque du héros
 - Clic droit : poser le bloc sélectionné (contre un bloc existant, à portée)
 - Molette (ou `1` / `2` / `3`) : sélectionner l'emplacement de raccourci
@@ -191,12 +211,12 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `src/audio.js` — lecture des effets sonores : banque de fichiers, pas d'herbe échantillonnés, froissement de l'herbe synthétisé, autres matières synthétisées en secours, spatialisation, volume et sourdine.
 - `src/sfx-library.js` — catalogue généré des sons (événement → variantes, sources d'origine et gain), écrit par `tools/build-sfx.mjs`.
 - `assets/sfx/` — les 199 Wave adaptés (CC0), 3 à 8 variantes par événement.
-- `src/net.js` — WebSocket sur la même origine et reconnexion automatique.
+- `src/net.js` — WebSocket sur la même origine, reconnexion automatique et envoi des lignes de discussion.
 - `tools/make-sprites.py` — générateur (Pillow) des feuilles de sprites originales de Sora et Raiden.
 - `tools/build-sfx.mjs` — récupère les sons CC0 sur GitHub, les adapte (mono, 44,1 kHz, silences coupés, 0,8 s max) et régénère `assets/sfx/` + `src/sfx-library.js`.
-- `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz et synchronise les blocs minés / les drops dans l'arène (état en mémoire). Il écoute sur toutes les interfaces et fournit `/healthz` pour le déploiement.
+- `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz et synchronise les blocs minés / les drops dans l'arène (état en mémoire). Il diffuse aussi la discussion, résout les pseudos des commandes `/tp` et `/kill` et n'avertit que le client concerné. Il écoute sur toutes les interfaces et fournit `/healthz` pour le déploiement.
 
-Chaque client envoie sa position, son animation, son personnage, ses points de vie, son état de K.O. et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde est généré à partir d'une graine commune. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné, le terrain miné et les drops actifs restent en mémoire, et un joueur muet pendant plus de 20 s est déconnecté.
+Chaque client envoie sa position, son animation, son personnage, ses points de vie, son état de K.O., son compteur d'attaque et la position de son curseur 20 fois par seconde. Les positions distantes (joueurs comme curseurs) sont interpolées pour rester fluides. Le monde est généré à partir d'une graine commune. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné, la discussion est limitée à huit lignes par tranche de 5 s, le terrain miné et les drops actifs restent en mémoire, et un joueur muet pendant plus de 20 s est déconnecté.
 
 ## Tests
 
@@ -206,7 +226,7 @@ npm test
 
 Le démarrage complet de la page est rejoué sans navigateur (`test/game-boot.test.js`) : chargement des scripts, quatre héros affichés, connexion à l'arène, entrée en jeu et arrivée d'un autre joueur — de quoi repérer immédiatement un script qui planterait au chargement.
 
-Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, quantités et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage unique du butin (`test/net.test.js`, `test/server.test.js`). Les scénarios de combat (`test/combat.test.js`) rejouent les quatre styles d'attaque face à un mur, la mort avec inventaire, la réapparition, les confirmations réseau tardives et la récupération du stuff hors ligne. Les entrées (`test/input.test.js`) couvrent la visée au curseur en marchant dans l'autre sens, le déplacement de caméra, le HUD, la pause et le toucher. Les tests de minage et de serveur vérifient aussi les trous rebouchés plusieurs fois et le minage maintenu lorsqu'un bloc est reposé entre deux images.
+Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, quantités et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage unique du butin (`test/net.test.js`, `test/server.test.js`). Les scénarios de combat (`test/combat.test.js`) rejouent les quatre styles d'attaque face à un mur, la mort avec inventaire, la réapparition, les confirmations réseau tardives et la récupération du stuff hors ligne. Les entrées (`test/input.test.js`) couvrent la visée au curseur en marchant dans l'autre sens, le déplacement de caméra, le HUD, la pause et le toucher. La discussion (`test/chat.test.js`) rejoue la touche `T`, l'envoi d'une ligne, l'affichage des messages reçus, l'exécution des commandes `/tp` et `/kill`, le relais des curseurs et le repli hors ligne. Les tests de minage et de serveur vérifient aussi les trous rebouchés plusieurs fois et le minage maintenu lorsqu'un bloc est reposé entre deux images.
 
 ## Sprites et décor
 
