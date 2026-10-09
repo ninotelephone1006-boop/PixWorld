@@ -1,16 +1,23 @@
-# Sprite du ninja
+# Crédits et licences des ressources
 
-- **Fichier :** `ninja-black-32x32.png`
-- **Créateurs :** Morgan McGuire et DezrasDragons (2018)
-- **Source :** [OpenGameArt — Ninja \[Animated\]](https://opengameart.org/content/ninja-animated-0)
-- **Licence :** [CC0 1.0 / domaine public](https://creativecommons.org/publicdomain/zero/1.0/). Attribution non obligatoire ; crédit conservé ici par courtoisie.
-- **Animations intégrées :** idle, run (utilisée pour le déplacement), saut et attaque.
+## Personnages — spritesheets CC0
 
-La feuille est une grille de cellules de 32 × 32 px. Le fichier JSON de quadplay dont elle provient confirme l'origine et la licence : [morgan3d/quadplay — métadonnées du sprite](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-black-32x32.sprite.json).
+- **Sprite de base :** `ninja-black-32x32.png` (Kage).
+- **Nouveaux héros :** `characters/ninja-bow-32x32.png` (Sora), `characters/ninja-sword-32x32.png` (Raiden) et `characters/ninja-purple-32x32.png` (Yume).
+- **Création / adaptation :** Morgan McGuire (2018), d'après l'illustration de DezrasDragons.
+- **Sources GitHub :** [ninja noir](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-black-32x32.png), [ninja à l'arc](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-bow-32x32.png), [ninja au sabre](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-sword-32x32.png), [ninja violet](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-purple-32x32.png).
+- **Licence :** [CC0 1.0 / domaine public](https://creativecommons.org/publicdomain/zero/1.0/) — attribution non obligatoire ; crédit conservé par courtoisie. Les fichiers de métadonnées source dans le dépôt quadplay précisent explicitement la licence CC0 pour chaque sprite.
+- **Animations :** feuilles de 256 × 128 px, cellules de 32 × 32 px ; idle, course, saut et attaque. Les effets de shuriken, flèche, coupe et orbe sont dessinés dans PixWorld.
+
+Le ninja original provient de [OpenGameArt — Ninja Animated](https://opengameart.org/content/ninja-animated-0). Les feuilles d'arc et de sabre viennent des variantes correspondantes du même pack CC0.
 
 ## Décor « Sunny Land » (parallaxe)
 
 - **Fichiers :** `background/sky-back.png` (ciel et nuages), `background/hills-middle.png` (collines), `background/tileset.png` (sol en tuiles et touffes d'herbe).
-- **Créateur :** Luis Zuno, alias [Ansimuz](https://ansimuz.com) (pack « Sunny Land », 2017).
-- **Source GitHub :** récupéré depuis [gnaigsolo/thelostfox](https://github.com/gnaigsolo/thelostfox) et [Kevin1321/DA_Module_12_SunnyLand](https://github.com/Kevin1321/DA_Module_12_SunnyLand), qui redistribuent le pack publié par l'auteur (pack gratuit ; crédit conservé ici par courtoisie).
-- **Utilisation :** les trois images sont défilées en parallaxe (ciel lent, collines moyennes, sol à la vitesse de la caméra, herbes rapides au premier plan).
+- **Créateur :** Luis Zuno, alias [Ansimuz](https://ansimuz.com), pack « Sunny Land » (2017).
+- **Source GitHub :** récupéré depuis [gnaigsolo/thelostfox](https://github.com/gnaigsolo/thelostfox) et [Kevin1321/DA_Module_12_SunnyLand](https://github.com/Kevin1321/DA_Module_12_SunnyLand), dépôts qui redistribuent le pack gratuit de l'auteur.
+- **Utilisation :** ciel lent, collines moyennes, sol et herbes de premier plan défilent à différentes vitesses.
+
+## Menu
+
+Le menu n'embarque pas de texture externe : ses panneaux, grilles, lueurs, anneaux et animations sont générés en CSS et Canvas. Il utilise les spritesheets CC0 ci-dessus pour les aperçus animés des héros.

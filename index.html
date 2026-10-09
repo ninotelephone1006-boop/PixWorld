@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#58a6e8" />
-    <title>PixWorld — Prototype 2D multijoueur</title>
+    <title>PixWorld — Héros pixel art en ligne</title>
     <style>
       :root {
         color-scheme: dark;
@@ -290,6 +290,16 @@
         white-space: nowrap;
       }
 
+      .players-list .player-class {
+        max-width: 58px;
+        overflow: hidden;
+        color: rgb(255 255 255 / 52%);
+        font-size: 9px;
+        font-weight: 700;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       .players-list .self-tag {
         flex: none;
         font-size: 9px;
@@ -343,166 +353,6 @@
         }
       }
 
-      /* ----- Écran de pseudo, avant de commencer ----- */
-
-      .join {
-        position: absolute;
-        inset: 0;
-        z-index: 5;
-        display: grid;
-        padding: 18px;
-        place-items: center;
-        background: rgb(8 28 50 / 52%);
-        backdrop-filter: blur(7px);
-      }
-
-      .join[hidden] {
-        display: none;
-      }
-
-      .join-card {
-        width: min(360px, 100%);
-        padding: 20px 20px 18px;
-        border: 1px solid rgb(255 255 255 / 20%);
-        border-radius: 18px;
-        background: linear-gradient(180deg, rgb(19 58 96 / 92%), rgb(12 40 70 / 94%));
-        box-shadow: 0 24px 60px rgb(6 24 44 / 38%);
-        color: #fff;
-      }
-
-      .join-title {
-        margin: 0;
-        font-size: 17px;
-        font-weight: 800;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-      }
-
-      .join-subtitle {
-        margin: 6px 0 16px;
-        color: rgb(255 255 255 / 68%);
-        font-size: 12px;
-        line-height: 1.5;
-      }
-
-      .join-field {
-        display: grid;
-        gap: 7px;
-      }
-
-      .join-label {
-        font-size: 10px;
-        font-weight: 800;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: rgb(255 255 255 / 62%);
-      }
-
-      .join-input {
-        width: 100%;
-        padding: 11px 13px;
-        border: 1px solid rgb(255 255 255 / 22%);
-        border-radius: 11px;
-        outline: none;
-        background: rgb(255 255 255 / 9%);
-        color: #fff;
-        font: inherit;
-        font-size: 14px;
-        font-weight: 600;
-      }
-
-      .join-input::placeholder {
-        color: rgb(255 255 255 / 40%);
-      }
-
-      .join-input:focus {
-        border-color: rgb(255 191 103 / 70%);
-        box-shadow: 0 0 0 3px rgb(255 191 103 / 18%);
-      }
-
-      .join-colors {
-        display: flex;
-        gap: 9px;
-        margin-top: 15px;
-      }
-
-      .join-color {
-        width: 28px;
-        height: 28px;
-        padding: 0;
-        border: 2px solid transparent;
-        border-radius: 50%;
-        outline: none;
-        cursor: pointer;
-        transition: transform 0.12s ease;
-      }
-
-      .join-color:hover {
-        transform: scale(1.08);
-      }
-
-      .join-color[aria-pressed="true"] {
-        border-color: #fff;
-        box-shadow: 0 0 0 3px rgb(255 255 255 / 18%);
-      }
-
-      .join-submit {
-        width: 100%;
-        margin-top: 18px;
-        padding: 12px 14px;
-        border: 0;
-        border-radius: 12px;
-        background: #ffbf67;
-        color: #20364d;
-        font: inherit;
-        font-size: 13px;
-        font-weight: 800;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        cursor: pointer;
-      }
-
-      .join-submit:hover {
-        background: #ffcb85;
-      }
-
-      .join-status {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        margin: 12px 0 0;
-        color: rgb(255 255 255 / 62%);
-        font-size: 11px;
-        font-weight: 600;
-      }
-
-      .join-status::before {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        background: #7ee39a;
-        content: "";
-      }
-
-      .join-status[data-tone="local"]::before {
-        background: #ffbf67;
-      }
-
-      .join-status[data-tone="solo"]::before {
-        background: #9fb0c2;
-      }
-
-      .join-status[data-tone="wait"]::before {
-        background: #9fb0c2;
-        animation: pulse 1.1s ease-in-out infinite;
-      }
-
-      @keyframes pulse {
-        50% {
-          opacity: 0.3;
-        }
-      }
-
       @media (max-width: 560px) {
         .controls {
           flex-wrap: wrap;
@@ -529,6 +379,10 @@
           max-height: 104px;
         }
 
+        .players-list .player-class {
+          display: none;
+        }
+
         .toasts {
           bottom: auto;
           top: 14px;
@@ -546,10 +400,11 @@
         }
       }
     </style>
+    <link rel="stylesheet" href="assets/menu.css" />
   </head>
   <body>
     <main class="game" aria-label="Jeu de plateforme PixWorld">
-      <canvas id="world" aria-label="Un ninja animé sur un sol gris, dans un ciel bleu."></canvas>
+      <canvas id="world" aria-label="Un monde de plateforme pixel art, avec des héros animés et un décor en parallaxe."></canvas>
 
       <section class="hud" aria-label="Commandes du jeu">
         <div class="brand">
@@ -565,6 +420,7 @@
           <span class="control"><kbd class="space">ESPACE</kbd> sauter</span>
           <span class="control"><kbd>X</kbd> attaquer</span>
           <span class="control"><kbd class="space">CLIC G</kbd> attaquer</span>
+          <span class="control"><kbd>ESC</kbd> menu</span>
         </div>
       </section>
 
@@ -579,42 +435,95 @@
 
       <div class="toasts" id="toasts" aria-live="polite"></div>
 
-      <p class="hint">ESPACE SAUTE · X OU CLIC GAUCHE ATTAQUE</p>
+      <p class="hint">ESPACE SAUTE · X ATTAQUE · ÉCHAP MENU</p>
 
-      <div class="join" id="join">
-        <form class="join-card" id="join-form" autocomplete="off">
-          <h2 class="join-title" id="join-title">Choisir un pseudo</h2>
-          <p class="join-subtitle">
-            Ton pseudo et ta couleur sont visibles par les autres joueurs présents sur la page, au-dessus de ton ninja et dans la liste en haut à droite.
-          </p>
+      <section class="game-menu" id="game-menu" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+        <form class="menu-shell" id="menu-form" autocomplete="off">
+          <section class="menu-world" aria-label="Univers PixWorld">
+            <div class="menu-brand">
+              <span class="menu-brand-mark" aria-hidden="true"></span>
+              <div>
+                <p class="menu-brand-name">PIXWORLD</p>
+                <p class="menu-brand-subtitle">L'arène des pixels</p>
+              </div>
+            </div>
 
-          <div class="join-field">
-            <label class="join-label" for="join-input">Pseudo</label>
-            <input
-              class="join-input"
-              id="join-input"
-              name="pseudo"
-              type="text"
-              maxlength="14"
-              placeholder="Ninja"
-              spellcheck="false"
-              autocomplete="off"
-              required
-            />
-          </div>
+            <div class="menu-world-copy">
+              <p class="menu-world-kicker">Une aventure à partager</p>
+              <h2 class="menu-world-title">Choisis ta voie.<br /><em>Écris ta légende.</em></h2>
+              <p class="menu-world-description">
+                Un monde lumineux, quatre styles de combat et tes amis à portée de ninja.
+                Qui rejoindra l'arène aujourd'hui ?
+              </p>
+            </div>
 
-          <div class="join-field">
-            <span class="join-label">Couleur</span>
-            <div class="join-colors" id="join-colors" role="group" aria-label="Couleur du ninja"></div>
-          </div>
+            <div class="menu-sprite-stage" aria-hidden="true">
+              <canvas class="menu-featured-preview" id="menu-featured-preview" width="192" height="192"></canvas>
+            </div>
 
-          <button class="join-submit" id="join-submit" type="submit">Commencer</button>
-          <p class="join-status" id="join-status" data-tone="wait">Connexion à la partie…</p>
+            <div class="menu-world-foot">
+              <p><strong id="menu-world-character">Kage · Ninja</strong>SPRITE ANIMÉ · PIXEL ART</p>
+              <p class="menu-build">MONDE OUVERT<br />PARTIE EN TEMPS RÉEL</p>
+            </div>
+          </section>
+
+          <section class="menu-console" aria-label="Choix du personnage et du profil">
+            <header class="menu-console-head">
+              <div>
+                <p class="menu-kicker" id="menu-kicker">AVANT DE PARTIR · ÉTAPE 01</p>
+                <h2 id="menu-title">Choisis ton combattant</h2>
+                <p class="menu-copy" id="menu-copy">
+                  Chaque héros a son propre style d'attaque. Choisis ton préféré avant d'entrer dans le monde.
+                </p>
+              </div>
+              <button class="menu-close" id="menu-close" type="button" title="Reprendre la partie" aria-label="Reprendre la partie" hidden>×</button>
+            </header>
+
+            <div class="menu-roster-tools" aria-hidden="true">
+              <span>La sélection des héros</span>
+              <span>01 — 04 · Choisis ton style</span>
+            </div>
+            <div class="character-roster" id="character-roster" role="group" aria-label="Personnages disponibles"></div>
+
+            <div class="menu-divider" aria-hidden="true"></div>
+
+            <div class="menu-identity">
+              <label class="menu-field" for="menu-name-input">
+                <span class="menu-label">Ton pseudo · 14 caractères max</span>
+                <input
+                  class="menu-name-input"
+                  id="menu-name-input"
+                  name="pseudo"
+                  type="text"
+                  maxlength="14"
+                  placeholder="Ninja"
+                  spellcheck="false"
+                  autocomplete="off"
+                  required
+                />
+              </label>
+              <div class="menu-field">
+                <span class="menu-label">Couleur de ton aura</span>
+                <div class="menu-colors" id="menu-colors" role="group" aria-label="Couleur du personnage"></div>
+              </div>
+            </div>
+
+            <div class="menu-actions">
+              <button class="menu-primary" id="menu-play" type="submit">
+                <span id="menu-play-label">Entrer dans l'arène</span>
+                <span class="menu-arrow" aria-hidden="true">→</span>
+              </button>
+              <button class="menu-secondary" id="menu-home" type="button" hidden>Quitter vers le titre</button>
+            </div>
+            <p class="menu-status" id="menu-status" data-tone="wait" aria-live="polite">Connexion à la partie…</p>
+          </section>
         </form>
-      </div>
+        <p class="menu-global-hint" id="menu-hint">CHOISIS TON HÉROS · PUIS ENTRE DANS L'ARÈNE</p>
+      </section>
     </main>
 
     <script src="src/net.js"></script>
+    <script src="src/characters.js"></script>
     <script src="src/game.js"></script>
   </body>
 </html>

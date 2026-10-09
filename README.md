@@ -1,6 +1,6 @@
 # PixWorld
 
-Prototype de jeu de plateforme 2D en HTML Canvas, **jouable à plusieurs dans le navigateur**.
+Jeu de plateforme 2D en HTML Canvas, **jouable à plusieurs dans le navigateur**. Choisis ton héros dans l'écran titre, puis explore un niveau pixel art animé.
 
 Ouvre `index.html` dans un navigateur pour jouer seul, ou lance le serveur pour voir les autres joueurs en temps réel :
 
@@ -9,47 +9,57 @@ npm start          # http://localhost:3000
 PORT=8080 npm start
 ```
 
+## Écran titre et héros
+
+Le menu d'accueil apparaît dès l'ouverture du jeu. Choisis un personnage, un pseudo et une couleur d'aura, puis sélectionne **Entrer dans l'arène**. Le nom, la couleur et le héros choisi sont mémorisés dans le navigateur. En cours de partie, `Échap` ouvre le menu pause : tu peux reprendre, changer de héros ou revenir à l'écran titre.
+
+Quatre combattants ont chacun leur sprite animé et leur propre attaque visuelle :
+
+| Héros | Style | Attaque |
+| --- | --- | --- |
+| **Kage — Ninja** | Éclaireur rapide | Shuriken tournoyant |
+| **Sora — Archère** | Tir à distance rapide | Flèche de vent |
+| **Raiden — Samouraï** | Mêlée | Coupe du tonnerre en arc |
+| **Yume — Arcaniste** | Magie à distance | Orbe astral lumineux |
+
+Le choix du héros est synchronisé entre joueurs : sprites, mouvements et déclenchements d'attaque sont visibles par les autres. Les attaques sont des effets de combat visuels ; le prototype n'a pas encore de système de points de vie ou de dégâts.
+
 ## Multijoueur
 
-Avant de commencer, un petit écran demande un **pseudo** (14 caractères max) et une **couleur**. Ensuite :
-
-- chaque joueur apparaît dans le monde avec son ninja teinté de sa couleur ;
-- son **pseudo flotte au-dessus de lui** dans une petite étiquette ;
-- la **liste des joueurs** en haut à droite rappelle qui est là (`Alice (vous)`, `Bob`, …) ;
-- un message s'affiche brièvement quand quelqu'un arrive ou part ;
-- si un joueur sort de l'écran, une **flèche à son nom** indique de quel côté il se trouve.
-
-Le petit crayon `✎` de la liste permet de changer de pseudo en cours de partie. Le pseudo et la couleur sont mémorisés dans le navigateur.
+- Chaque joueur apparaît avec son personnage et son aura ; son **pseudo flotte au-dessus de lui**.
+- La **liste des joueurs** en haut à droite rappelle qui est là (`Alice (vous)`, `Bob`, …) et indique leur classe.
+- Un message s'affiche brièvement quand quelqu'un arrive ou part.
+- Si un joueur sort de l'écran, une **flèche à son nom** indique de quel côté il se trouve.
+- Le crayon `✎` de la liste rouvre le menu pour changer de pseudo, de couleur ou de héros.
 
 ### Trois modes, automatiques
 
-| Mode        | Quand ?                                                          | Ce que ça permet |
-| ----------- | ---------------------------------------------------------------- | ---------------- |
-| **En ligne** | le serveur Node répond (`npm start`)                             | jouer à plusieurs depuis plusieurs machines / navigateurs |
-| **Onglets**  | pas de serveur (page ouverte en direct, hébergement statique…)   | se voir entre onglets d'un même navigateur, sans serveur |
-| **Solo**     | navigateur sans `BroadcastChannel`                               | jouer seul |
+| Mode | Quand ? | Ce que ça permet |
+| --- | --- | --- |
+| **En ligne** | Le serveur Node répond (`npm start`) | Jouer à plusieurs depuis différentes machines / navigateurs |
+| **Onglets** | Pas de serveur (page ouverte directement, hébergement statique…) | Se voir entre onglets d'un même navigateur |
+| **Solo** | Navigateur sans `BroadcastChannel` | Jouer seul |
 
-Le mode est indiqué en haut à droite (pastille « en ligne », « onglets », « solo »). Si le serveur redémarre, le jeu retente de se reconnecter tout seul avec un délai croissant.
-
-## Comment ça marche
-
-- `index.html` — mise en page, HUD et styles de l'interface (écran de pseudo, liste des joueurs, notifications).
-- `src/game.js` — boucle de jeu, animations, dessin des joueurs distants (interpolation des positions, teinte par joueur, étiquettes de pseudo).
-- `src/net.js` — couche réseau : WebSocket vers le serveur, repli sur `BroadcastChannel`, reconnexion.
-- `server/server.js` — serveur de fichiers statiques **+ WebSocket sans aucune dépendance** : il relaie 20 fois par seconde la position de chacun. Aucune donnée n'est conservée.
-
-Chaque client envoie son état (`x`, hauteur au-dessus du sol, direction, vitesse, attaque…) 20 fois par seconde, et reçoit celui de tous les autres. Les positions des autres joueurs sont interpolées pour rester fluides entre deux messages. Le monde fait désormais une largeur fixe (2600 px) partagée par tous : tout le monde parcourt le même niveau, quelle que soit la taille de son écran.
-
-Côté serveur, les pseudos sont nettoyés et limités à 14 caractères, les nombres sont bornés, le débit est plafonné et un joueur muet pendant plus de 20 s est déconnecté.
+Le mode est indiqué en haut à droite. Si le serveur redémarre, le jeu retente automatiquement de se reconnecter avec un délai croissant.
 
 ## Commandes
 
-- `A` (AZERTY) ou `Q` (QWERTY) : aller à gauche
-- `D` : aller à droite
-- Flèches gauche/droite : se déplacer aussi
+- `A` (AZERTY) ou `Q` (QWERTY), ou flèche gauche : aller à gauche
+- `D` ou flèche droite : aller à droite
 - `Espace` : sauter
-- `X` : attaquer
-- Clic gauche : attaquer (dans la direction du curseur)
+- `X` ou clic gauche : lancer l'attaque du héros (le clic choisit aussi la direction)
+- `Échap` : ouvrir le menu pause / reprendre
+
+## Structure du projet
+
+- `index.html` — canvas, HUD et structure de l'écran titre.
+- `assets/menu.css` — menu animé et responsive, sélection des héros et écran pause.
+- `src/characters.js` — catalogue des combattants et réglages de leurs attaques.
+- `src/game.js` — boucle de jeu, spritesheets, effets d'attaque et interpolation des joueurs distants.
+- `src/net.js` — WebSocket, repli sur `BroadcastChannel` et reconnexion.
+- `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz, sans conserver de données.
+
+Chaque client envoie sa position, son animation, son personnage et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde fait 2600 px de large et est partagé par tous. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné et un joueur muet pendant plus de 20 s est déconnecté.
 
 ## Tests
 
@@ -57,8 +67,8 @@ Côté serveur, les pseudos sont nettoyés et limités à 14 caractères, les no
 npm test
 ```
 
-Les tests (`test/net.test.js`, sans dépendance) rejouent la couche réseau avec un faux WebSocket et un faux `BroadcastChannel` : partie en ligne, absence de serveur, reconnexion, mode onglets.
+Les tests (`test/net.test.js`, sans dépendance) rejouent les transports en ligne et local, la reconnexion et la synchronisation des héros / attaques à l'aide de faux WebSocket et `BroadcastChannel`.
 
-## Sprite et décor
+## Sprites et décor
 
-Le rectangle de test a été remplacé par un ninja pixel art CC0. Ses animations idle, run (utilisée pendant le déplacement), saut et attaque sont jouées selon les commandes. Le décor en parallaxe vient du pack « Sunny Land » d'Ansimuz (ciel/nuages, collines, sol en tuiles et herbes au premier plan), chaque couche défilant à une vitesse différente selon la caméra. Les crédits et la licence sont dans [`assets/CREDITS.md`](assets/CREDITS.md).
+Les personnages utilisent des spritesheets pixel art CC0 (animations idle, course, saut et attaque). Le décor en parallaxe vient du pack « Sunny Land » d'Ansimuz. Le menu ajoute ses cadres, grilles, lueurs et rotations en CSS/canvas ; il n'intègre aucune texture tierce non créditée. Les sources et licences sont détaillées dans [`assets/CREDITS.md`](assets/CREDITS.md).
