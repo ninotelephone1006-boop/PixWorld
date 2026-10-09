@@ -119,7 +119,6 @@ async function testOnlineGame() {
   const browser = makeBrowser();
   const net = browser.sandbox.PixWorldNet.connect({
     name: "Ninja",
-    color: "#ff8a5c",
     character: "archer",
     onEvent: (message) => events.push(message),
   });
@@ -131,23 +130,26 @@ async function testOnlineGame() {
   socket.open();
   check("le mode passe à « online »", net.mode === "online", net.mode);
 
-  net.join("Alice", "#ff8a5c", "archer");
+  net.join("Alice", "archer");
   const hello = socket.sent[0];
   check("le pseudo et le personnage sont annoncés", hello && hello.t === "hello" && hello.name === "Alice" && hello.character === "archer", JSON.stringify(hello));
+  check("aucune couleur envoyée dans le protocole", hello && !("color" in hello));
 
-  net.sendState({ x: 120, gap: 0, f: 1, vx: 340, vy: 0, g: true, a: 0, c: "archer", n: 2 });
+  net.sendState({ x: 120, gap: 0, f: 1, vx: 340, vy: 0, g: true, a: 0, c: "archer", n: 2, hp: 86 });
   check("la position et l'attaque sont envoyées", socket.sent[1] && socket.sent[1].t === "state" && socket.sent[1].x === 120 && socket.sent[1].c === "archer" && socket.sent[1].n === 2);
+  check("les points de vie sont envoyés", socket.sent[1] && socket.sent[1].hp === 86, JSON.stringify(socket.sent[1]));
 
-  net.rename("Alice", "#c792ea", "mage");
+  net.rename("Alice", "mage");
   check("le changement de héros est transmis", socket.sent[2] && socket.sent[2].t === "rename" && socket.sent[2].character === "mage");
 
-  socket.onmessage({ data: JSON.stringify({ t: "welcome", id: "p1", players: [{ id: "p2", name: "Bob", color: "#5cc8ff", character: "mage" }] }) });
-  socket.onmessage({ data: JSON.stringify({ t: "snapshot", p: [{ id: "p2", x: 400, gap: 30, f: -1, vx: 0, vy: 0, g: false, a: 0 }] }) });
+  socket.onmessage({ data: JSON.stringify({ t: "welcome", id: "p1", players: [{ id: "p2", name: "Bob", character: "mage" }] }) });
+  socket.onmessage({ data: JSON.stringify({ t: "snapshot", p: [{ id: "p2", x: 400, gap: 30, f: -1, vx: 0, vy: 0, g: false, a: 0, hp: 55 }] }) });
   socket.onmessage({ data: JSON.stringify({ t: "leave", id: "p2" }) });
 
   const types = events.map((m) => m.t).join(",");
   check("les joueurs déjà présents sont annoncés", types === "welcome,snapshot,leave", types);
   check("le joueur distant garde son personnage", events[0].players[0].name === "Bob" && events[0].players[0].character === "mage");
+  check("les points de vie distants sont relayés", events[1].p[0].hp === 55, JSON.stringify(events[1]));
 
   net.close();
 }
@@ -155,10 +157,10 @@ async function testOnlineGame() {
 async function testNoServer() {
   console.log("Sans serveur, repli sur les onglets du navigateur");
   const browser = makeBrowser({ channelClass: createChannelBus() });
-  const net = browser.sandbox.PixWorldNet.connect({ name: "Alice", color: "#fff", onEvent: () => {} });
+  const net = browser.sandbox.PixWorldNet.connect({ name: "Alice", onEvent: () => {} });
   browser.sockets[0].fail();
   check("le mode bascule sur « local »", net.mode === "local", net.mode);
-  net.join("Alice", "#fff");
+  net.join("Alice");
   net.close();
 }
 
@@ -169,14 +171,13 @@ async function testReconnect() {
   const browser = makeBrowser();
   const net = browser.sandbox.PixWorldNet.connect({
     name: "Alice",
-    color: "#ff8a5c",
     character: "samurai",
     onEvent: (message) => events.push(message),
     onMode: (mode) => modes.push(mode),
   });
 
   browser.sockets[0].open();
-  net.join("Alice", "#ff8a5c", "samurai");
+  net.join("Alice", "samurai");
   browser.sockets[0].fail(); // le serveur tombe
   check("le jeu est prévenu de la coupure", events.some((m) => m.t === "disconnected"));
   check("le mode devient « reconnect »", net.mode === "reconnect", net.mode);
@@ -203,13 +204,13 @@ async function testLocalTabs() {
   const a = makeBrowser({ noServer: true, channelClass: bus });
   const b = makeBrowser({ noServer: true, channelClass: bus });
 
-  const netA = a.sandbox.PixWorldNet.connect({ name: "Alice", color: "#ff8a5c", character: "archer", onEvent: (m) => eventsA.push(m) });
-  const netB = b.sandbox.PixWorldNet.connect({ name: "Bob", color: "#5cc8ff", character: "mage", onEvent: (m) => eventsB.push(m) });
+  const netA = a.sandbox.PixWorldNet.connect({ name: "Alice", character: "archer", onEvent: (m) => eventsA.push(m) });
+  const netB = b.sandbox.PixWorldNet.connect({ name: "Bob", character: "mage", onEvent: (m) => eventsB.push(m) });
 
-  netA.join("Alice", "#ff8a5c", "archer");
-  netB.join("Bob", "#5cc8ff", "mage");
+  netA.join("Alice", "archer");
+  netB.join("Bob", "mage");
 
-  netB.sendState({ x: 500, gap: 12, f: -1, vx: -340, vy: 0, g: true, a: 0.3, c: "mage", n: 1 });
+  netB.sendState({ x: 500, gap: 12, f: -1, vx: -340, vy: 0, g: true, a: 0.3, c: "mage", n: 1, hp: 42 });
   await wait(120);
 
   const joinOnA = eventsA.filter((m) => m.t === "join");
@@ -217,6 +218,7 @@ async function testLocalTabs() {
 
   const snapshotOnA = eventsA.filter((m) => m.t === "snapshot").pop();
   check("Alice reçoit la position et l'attaque de Bob", snapshotOnA && snapshotOnA.p[0].x === 500 && snapshotOnA.p[0].gap === 12 && snapshotOnA.p[0].c === "mage" && snapshotOnA.p[0].n === 1, JSON.stringify(snapshotOnA));
+  check("Alice reçoit la vie de Bob", snapshotOnA && snapshotOnA.p[0].hp === 42, JSON.stringify(snapshotOnA));
 
   const joinOnB = eventsB.filter((m) => m.t === "join");
   check("Bob voit Alice", joinOnB.length === 1 && joinOnB[0].player.name === "Alice" && joinOnB[0].player.character === "archer", JSON.stringify(joinOnB));

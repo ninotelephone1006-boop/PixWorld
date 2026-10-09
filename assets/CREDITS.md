@@ -2,8 +2,9 @@
 
 ## Personnages — spritesheets CC0
 
-- **Sprite de base :** `ninja-black-32x32.png` (Kage).
-- **Nouveaux héros :** `characters/ninja-bow-32x32.png` (Sora), `characters/ninja-sword-32x32.png` (Raiden) et `characters/ninja-purple-32x32.png` (Yume).
+- **Corps de base :** `ninja-black-32x32.png` (Kage, et corps de Sora et Raiden).
+- **Surcouches d'arme :** `characters/ninja-bow-32x32.png` (arc de Sora) et `characters/ninja-sword-32x32.png` (sabre de Raiden). Ces deux feuilles du pack d'origine **ne contiennent que l'arme** : PixWorld les compose par-dessus le corps du ninja, image par image. C'est le montage prévu par les auteurs — dessinées seules, elles n'affichent que l'arme.
+- **Héroïne complète :** `characters/ninja-purple-32x32.png` (Yume).
 - **Création / adaptation :** Morgan McGuire (2018), d'après l'illustration de DezrasDragons.
 - **Sources GitHub :** [ninja noir](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-black-32x32.png), [ninja à l'arc](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-bow-32x32.png), [ninja au sabre](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-sword-32x32.png), [ninja violet](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-purple-32x32.png).
 - **Licence :** [CC0 1.0 / domaine public](https://creativecommons.org/publicdomain/zero/1.0/) — attribution non obligatoire ; crédit conservé par courtoisie. Les fichiers de métadonnées source dans le dépôt quadplay précisent explicitement la licence CC0 pour chaque sprite.

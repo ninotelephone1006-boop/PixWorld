@@ -1,10 +1,13 @@
 /**
  * PixWorld — jeu de plateforme 2D multijoueur.
  *
- * Chaque visiteur choisit son héros, son pseudo et sa couleur dans un menu
- * titre dédié. Les quatre combattants ont leur propre animation et leur
- * attaque visuelle ; Échap rouvre le menu en pause pendant la partie.
- * En multijoueur, héros, attaques et positions sont synchronisés en temps réel.
+ * Chaque visiteur choisit son héros et son pseudo dans un menu titre dédié.
+ * Les quatre combattants ont leur propre animation et leur attaque visuelle ;
+ * Échap rouvre le menu en pause pendant la partie.
+ * En multijoueur, héros, attaques, points de vie et positions sont synchronisés
+ * en temps réel. Chaque joueur porte une barre de vie : les attaques des
+ * autres (projectiles et coups de mêlée) nous enlèvent des points, et on
+ * réapparaît en pleine forme après un K.O.
  *
  * Le script reste utilisable sans serveur (solo, ou entre onglets d'un même
  * navigateur) : voir src/net.js pour les détails des transports.
@@ -28,7 +31,6 @@
   const menuStatus = document.querySelector("#menu-status");
   const menuHint = document.querySelector("#menu-hint");
   const menuWorldCharacter = document.querySelector("#menu-world-character");
-  const menuColors = document.querySelector("#menu-colors");
   const characterRoster = document.querySelector("#character-roster");
   const featuredPreview = document.querySelector("#menu-featured-preview");
   const featuredPreviewContext = featuredPreview.getContext("2d");
@@ -42,18 +44,31 @@
   const playersRename = document.querySelector("#players-rename");
   const toasts = document.querySelector("#toasts");
 
-  const COLORS = ["#ff8a5c", "#ffd166", "#7ee39a", "#5cc8ff", "#c792ea", "#ff7ab8", "#ff6b73", "#f4f7fb"];
   const STORAGE_NAME = "pixworld.name";
-  const STORAGE_COLOR = "pixworld.color";
   const STORAGE_CHARACTER = "pixworld.character";
   const FONT_STACK = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 
+  // Points de vie : barre au-dessus de chaque joueur, dégâts des attaques.
+  const MAX_HP = 100;
+  const REGEN_DELAY = 5; // secondes sans dégâts avant de se soigner
+  const REGEN_RATE = 9; // points de vie par seconde
+  const RESPAWN_INVULNERABILITY = 1.6;
+
   // ─────────────────────────── Sprites et décor ───────────────────────────
+  // Chaque héros a un corps (`sprite`) et, pour Sora et Raiden, une surcouche
+  // d'arme (`weaponSprite`) dessinée par-dessus : les feuilles d'arc et de
+  // sabre du pack CC0 ne contiennent que l'arme, pas le personnage.
   const characterSheets = Object.create(null);
   CHARACTERS.list.forEach((character) => {
-    const sheet = new Image();
-    sheet.src = character.sprite;
-    characterSheets[character.id] = sheet;
+    const body = new Image();
+    body.src = character.sprite;
+    const entry = { body, weapon: null };
+    if (character.weaponSprite) {
+      const weapon = new Image();
+      weapon.src = character.weaponSprite;
+      entry.weapon = weapon;
+    }
+    characterSheets[character.id] = entry;
   });
 
   // Décor pixel art « Sunny Land » (Ansimuz, CC0) : ciel, collines et
@@ -94,9 +109,10 @@
   // même niveau, quelle que soit la taille de son écran.
   const WORLD_WIDTH = 2600;
   const SEND_INTERVAL = 0.05; // 20 envois de position par seconde
+  const SPAWN_X = 112;
 
   const player = {
-    x: 112,
+    x: SPAWN_X,
     y: 0,
     width: 42,
     height: 60,
@@ -110,6 +126,9 @@
     attackTime: 0,
     attackSerial: 0,
     landingTime: 0,
+    hp: MAX_HP,
+    invulnerable: 0,
+    timeSinceDamage: 99,
   };
 
   let width = 0;
@@ -120,15 +139,14 @@
   let sendTimer = 0;
   let menuMode = "start";
   let selectedCharacter = "ninja";
-  let selectedColor = COLORS[0];
+  let lastPanelHp = MAX_HP;
   const projectiles = [];
 
   // ───────────────────────── État multijoueur ─────────────────────────
-  /** Autres joueurs : id -> { id, name, color, character, x, gap, rx, ry, ... } */
+  /** Autres joueurs : id -> { id, name, character, hp, x, gap, rx, ry, ... } */
   const others = new Map();
   const identity = {
     name: "Ninja",
-    color: COLORS[0],
     character: "ninja",
   };
   let net = null;
@@ -169,16 +187,17 @@
     return text || "Ninja";
   }
 
-  function cleanColor(raw) {
-    return COLORS.indexOf(raw) >= 0 ? raw : COLORS[0];
-  }
-
   function cleanCharacter(raw) {
     return CHARACTERS.isValid(raw) ? raw : "ninja";
   }
 
   function characterFor(id) {
     return CHARACTERS.get(cleanCharacter(id));
+  }
+
+  /** Couleur d'identification : toujours l'accent du héros choisi. */
+  function accentFor(id) {
+    return characterFor(id).accent;
   }
 
   // Petit hash déterministe pour varier terre et herbe sans aléatoire.
@@ -188,20 +207,6 @@
   }
 
   // ──────────────────────────── Interface ────────────────────────────
-  function buildColorSwatches() {
-    COLORS.forEach((color) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "menu-color";
-      button.style.setProperty("--swatch-color", color);
-      button.dataset.color = color;
-      button.setAttribute("aria-label", "Aura " + color);
-      button.setAttribute("aria-pressed", String(color === selectedColor));
-      button.addEventListener("click", () => selectColor(color));
-      menuColors.append(button);
-    });
-  }
-
   function buildCharacterCards() {
     CHARACTERS.list.forEach((character, index) => {
       const card = document.createElement("button");
@@ -252,20 +257,7 @@
 
   function selectCharacter(id) {
     selectedCharacter = cleanCharacter(id);
-    selectedColor = characterFor(selectedCharacter).accent;
     updateCharacterCards();
-    updateColorSwatches();
-  }
-
-  function selectColor(color) {
-    selectedColor = cleanColor(color);
-    updateColorSwatches();
-  }
-
-  function updateColorSwatches() {
-    menuColors.querySelectorAll(".menu-color").forEach((button) => {
-      button.setAttribute("aria-pressed", String(button.dataset.color === selectedColor));
-    });
   }
 
   function setStatus(text, tone) {
@@ -300,15 +292,28 @@
     }, 2800);
   }
 
+  /** Couleur de la barre de vie : vert plein → orange → rouge critique. */
+  function hpColor(ratio) {
+    const t = clamp(ratio, 0, 1);
+    if (t > 0.5) {
+      const k = (t - 0.5) / 0.5;
+      return "rgb(" + Math.round(255 - 128 * k) + ", " + Math.round(123 + 101 * k) + ", " + Math.round(64 + 62 * k) + ")";
+    }
+    const k = t / 0.5;
+    return "rgb(255, " + Math.round(77 + 46 * k) + ", " + Math.round(77 - 13 * k) + ")";
+  }
+
   function renderPanel() {
     if (!net) return;
     playersTitle.textContent = "Joueurs · " + (others.size + 1);
     playersList.textContent = "";
 
-    const rows = [{ name: identity.name, color: identity.color, character: identity.character, self: true }];
+    const rows = [
+      { name: identity.name, character: identity.character, hp: player.hp, self: true },
+    ];
     Array.from(others.values())
       .sort((a, b) => a.name.localeCompare(b.name, "fr"))
-      .forEach((peer) => rows.push({ name: peer.name, color: peer.color, character: peer.character, self: false }));
+      .forEach((peer) => rows.push({ name: peer.name, character: peer.character, hp: peer.hp, self: false }));
 
     rows.forEach((row) => {
       const li = document.createElement("li");
@@ -316,18 +321,27 @@
 
       const swatch = document.createElement("span");
       swatch.className = "swatch";
-      swatch.style.background = row.color;
+      swatch.style.background = accentFor(row.character);
 
       const name = document.createElement("span");
       name.className = "name";
       name.textContent = row.name + (row.self ? " (vous)" : "");
+
+      const meter = document.createElement("span");
+      meter.className = "hp-meter";
+      meter.title = "Vie " + Math.round(row.hp) + " / " + MAX_HP;
+      const fill = document.createElement("i");
+      const ratio = clamp(row.hp / MAX_HP, 0, 1);
+      fill.style.width = Math.round(ratio * 100) + "%";
+      fill.style.background = hpColor(ratio);
+      meter.append(fill);
 
       const role = document.createElement("span");
       role.className = "player-class";
       role.textContent = characterFor(row.character).role;
       role.title = characterFor(row.character).attackName;
 
-      li.append(swatch, name, role);
+      li.append(swatch, name, meter, role);
       playersList.append(li);
     });
   }
@@ -335,9 +349,7 @@
   function syncMenuFromIdentity() {
     menuNameInput.value = identity.name;
     selectedCharacter = cleanCharacter(identity.character);
-    selectedColor = cleanColor(identity.color);
     updateCharacterCards();
-    updateColorSwatches();
   }
 
   function openMenu(mode) {
@@ -386,20 +398,18 @@
     const name = cleanName(menuNameInput.value);
     const character = characterFor(selectedCharacter);
     identity.name = name;
-    identity.color = cleanColor(selectedColor);
     identity.character = character.id;
     player.speed = character.speed;
     player.jumpStrength = character.jumpStrength;
     remember(STORAGE_NAME, name);
-    remember(STORAGE_COLOR, identity.color);
     remember(STORAGE_CHARACTER, identity.character);
 
     if (net) {
       if (!hasJoined) {
         hasJoined = true;
-        net.join(name, identity.color, identity.character);
+        net.join(name, identity.character);
       } else {
-        net.rename(name, identity.color, identity.character);
+        net.rename(name, identity.character);
       }
     }
     panelDirty = true;
@@ -430,13 +440,16 @@
     others.clear();
     myId = null;
     hasJoined = false;
-    player.x = 112;
+    player.x = SPAWN_X;
     player.y = groundY - player.height;
     player.velocityX = 0;
     player.velocityY = 0;
     player.grounded = true;
     player.attackTime = 0;
     player.attackSerial = 0;
+    player.hp = MAX_HP;
+    player.invulnerable = 0;
+    player.timeSinceDamage = 99;
     projectiles.length = 0;
     connect();
     openMenu("start");
@@ -491,7 +504,6 @@
         const peer = others.get(message.id);
         if (peer && message.player) {
           peer.name = cleanName(message.player.name);
-          peer.color = cleanColor(message.player.color);
           peer.character = cleanCharacter(message.player.character);
           panelDirty = true;
         }
@@ -517,15 +529,14 @@
     const existing = others.get(data.id);
     if (existing) {
       existing.name = cleanName(data.name);
-      existing.color = cleanColor(data.color);
       existing.character = cleanCharacter(data.character || data.c || existing.character);
       return false;
     }
     others.set(data.id, {
       id: data.id,
       name: cleanName(data.name),
-      color: cleanColor(data.color),
       character: cleanCharacter(data.character || data.c),
+      hp: MAX_HP,
       x: player.x,
       gap: 0,
       f: 1,
@@ -534,6 +545,7 @@
       g: true,
       a: 0,
       attackSerial: 0,
+      lastMeleeHitSerial: 0,
       rx: player.x,
       ry: groundY - player.height,
       animTime: 0,
@@ -568,8 +580,9 @@
       peer.name = cleanName(state.name);
       panelDirty = true;
     }
-    if (state.color && cleanColor(state.color) !== peer.color) {
-      peer.color = cleanColor(state.color);
+    const nextHp = Number(state.hp);
+    if (Number.isFinite(nextHp) && clamp(nextHp, 0, MAX_HP) !== peer.hp) {
+      peer.hp = clamp(nextHp, 0, MAX_HP);
       panelDirty = true;
     }
     // Le compteur évite de rejouer les effets d'attaque reçus dans chaque snapshot.
@@ -586,7 +599,6 @@
   function connect() {
     net = window.PixWorldNet.connect({
       name: identity.name,
-      color: identity.color,
       character: identity.character,
       onEvent: handleNetworkMessage,
       onMode: applyMode,
@@ -625,11 +637,66 @@
     return keys.has("KeyD") || keys.has("d") || keys.has("ArrowRight");
   }
 
+  // ──────────────────────── Barre de vie / dégâts ────────────────────────
+
+  /** Enlève des points de vie au joueur local ; K.O. → réapparition. */
+  function applyDamage(amount) {
+    if (!playing || player.invulnerable > 0) return;
+    player.hp = Math.max(0, player.hp - amount);
+    player.timeSinceDamage = 0;
+    panelDirty = true;
+    if (player.hp <= 0) {
+      player.hp = MAX_HP;
+      player.x = SPAWN_X;
+      player.y = groundY - player.height;
+      player.velocityX = 0;
+      player.velocityY = 0;
+      player.grounded = true;
+      player.invulnerable = RESPAWN_INVULNERABILITY;
+      player.timeSinceDamage = 0;
+      toast("Tu as été mis K.O. · réapparition au camp de départ");
+    }
+  }
+
+  function hitsLocalPlayer(x, y, margin) {
+    const m = margin == null ? 8 : margin;
+    return (
+      x > player.x - m &&
+      x < player.x + player.width + m &&
+      y > player.y - m &&
+      y < player.y + player.height + m
+    );
+  }
+
+  /** Les coups de mêlée des autres (arc de coupe) peuvent nous atteindre. */
+  function checkMeleeHits() {
+    others.forEach((peer) => {
+      const character = characterFor(peer.character);
+      if (character.attackStyle !== "slash" || peer.a <= 0) return;
+      if (peer.lastMeleeHitSerial >= peer.attackSerial) return;
+      const progress = 1 - Math.min(peer.a, character.attackDuration) / character.attackDuration;
+      if (progress < 0.12 || progress > 0.78) return;
+      const peerX = peer.rx + player.width / 2;
+      const localX = player.x + player.width / 2;
+      const dx = (localX - peerX) * peer.f;
+      const dy = Math.abs(player.y + player.height / 2 - (peer.ry + player.height / 2));
+      if (dx > -28 && dx < 112 && dy < 82) {
+        peer.lastMeleeHitSerial = peer.attackSerial;
+        applyDamage(character.attackDamage);
+      }
+    });
+  }
+
   function update(delta) {
     if (playing) {
       player.animationTime += delta;
       player.attackTime = Math.max(0, player.attackTime - delta);
       player.landingTime = Math.max(0, player.landingTime - delta);
+      player.invulnerable = Math.max(0, player.invulnerable - delta);
+      player.timeSinceDamage += delta;
+      if (player.timeSinceDamage >= REGEN_DELAY && player.hp < MAX_HP) {
+        player.hp = Math.min(MAX_HP, player.hp + REGEN_RATE * delta);
+      }
 
       const direction = Number(isRightPressed()) - Number(isLeftPressed());
       player.velocityX = direction * player.speed;
@@ -656,6 +723,14 @@
 
     updateOthers(delta);
     updateProjectiles(delta);
+    checkMeleeHits();
+
+    // La barre de vie du panneau suit les régénérations et les dégâts.
+    const hpShown = Math.round(player.hp);
+    if (hpShown !== lastPanelHp) {
+      lastPanelHp = hpShown;
+      panelDirty = true;
+    }
 
     // On garde le joueur annoncé pendant une pause, avec sa position gelée.
     sendTimer += delta;
@@ -671,6 +746,7 @@
         a: Number(player.attackTime.toFixed(2)),
         c: identity.character,
         n: player.attackSerial,
+        hp: Math.round(player.hp),
       });
     }
   }
@@ -692,6 +768,13 @@
       projectile.x += projectile.speed * projectile.facing * delta;
       projectile.age += delta;
       projectile.life -= delta;
+      // Chaque client ne blesse que lui-même : la victime fait ses comptes.
+      if (!projectile.hitPlayer && projectile.owner !== "self") {
+        if (hitsLocalPlayer(projectile.x, projectile.y)) {
+          projectile.hitPlayer = true;
+          applyDamage(projectile.damage);
+        }
+      }
       if (projectile.life <= 0 || projectile.x < -80 || projectile.x > WORLD_WIDTH + 80) {
         projectiles.splice(i, 1);
       }
@@ -744,7 +827,8 @@
         player.x + player.width / 2 + player.facing * 18,
         player.y + player.height * 0.46,
         player.facing,
-        identity.color,
+        character.accent,
+        "self",
       );
     }
   }
@@ -757,11 +841,12 @@
       peer.rx + player.width / 2 + peer.f * 18,
       peer.ry + player.height * 0.46,
       peer.f,
-      peer.color,
+      character.accent,
+      peer.id,
     );
   }
 
-  function spawnProjectile(character, x, y, facing, color) {
+  function spawnProjectile(character, x, y, facing, color, owner) {
     projectiles.push({
       style: character.attackStyle,
       x,
@@ -772,6 +857,9 @@
       life: character.projectileLife,
       initialLife: character.projectileLife,
       color,
+      owner,
+      damage: character.attackDamage,
+      hitPlayer: false,
     });
     if (projectiles.length > 64) projectiles.splice(0, projectiles.length - 64);
   }
@@ -781,11 +869,16 @@
     const { column, row } = getSpriteFrame();
     const centerX = player.x + player.width / 2 - camX;
     const drawY = player.y - spriteTopPadding;
-    drawNinja(identity.character, column, row, player.facing, centerX, drawY, identity.color, 0.34);
-    drawCharacterAttack(character, player.attackTime, player.facing, centerX, player.y + player.height * 0.47, identity.color);
+    // Clignotement pendant l'invulnérabilité qui suit une réapparition.
+    const flicker = player.invulnerable > 0 && Math.floor(player.invulnerable * 14) % 2 === 0;
+    ctx.save();
+    if (flicker) ctx.globalAlpha = 0.35;
+    drawNinja(identity.character, column, row, player.facing, centerX, drawY, character.accent, 0.34);
+    ctx.restore();
+    drawCharacterAttack(character, player.attackTime, player.facing, centerX, player.y + player.height * 0.47, character.accent);
   }
 
-  // Chaque héros garde son sprite CC0 d'origine ; l'aura choisie teinte
+  // Chaque héros garde son sprite CC0 d'origine ; son accent teinte
   // légèrement sa silhouette pour le distinguer en multijoueur.
   const tintCanvas = document.createElement("canvas");
   tintCanvas.width = frameSize;
@@ -793,30 +886,45 @@
   const tintCtx = tintCanvas.getContext("2d");
   tintCtx.imageSmoothingEnabled = false;
 
+  /** Feuilles d'un héros réellement prêtes : corps + éventuelle surcouche d'arme. */
+  function loadedLayers(characterId) {
+    const sheets = characterSheets[cleanCharacter(characterId)];
+    if (!sheets) return [];
+    const layers = [];
+    [sheets.body, sheets.weapon].forEach((sheet) => {
+      if (sheet && sheet.complete && sheet.naturalWidth > 0) layers.push(sheet);
+    });
+    return layers;
+  }
+
   function drawNinja(characterId, column, row, facing, centerX, drawY, color, tintAlpha) {
-    const sheet = characterSheets[cleanCharacter(characterId)];
-    if (!sheet || !sheet.complete || sheet.naturalWidth === 0) return;
+    const layers = loadedLayers(characterId);
+    if (!layers.length) return;
     const sourceX = column * frameSize;
     const sourceY = row * frameSize;
 
     ctx.save();
     ctx.translate(Math.round(centerX), 0);
     ctx.scale(facing, 1);
-    ctx.drawImage(
-      sheet,
-      sourceX,
-      sourceY,
-      frameSize,
-      frameSize,
-      -spriteDrawSize / 2,
-      Math.round(drawY),
-      spriteDrawSize,
-      spriteDrawSize,
-    );
+    layers.forEach((sheet) => {
+      ctx.drawImage(
+        sheet,
+        sourceX,
+        sourceY,
+        frameSize,
+        frameSize,
+        -spriteDrawSize / 2,
+        Math.round(drawY),
+        spriteDrawSize,
+        spriteDrawSize,
+      );
+    });
 
     if (color && tintAlpha > 0) {
       tintCtx.clearRect(0, 0, frameSize, frameSize);
-      tintCtx.drawImage(sheet, sourceX, sourceY, frameSize, frameSize, 0, 0, frameSize, frameSize);
+      layers.forEach((sheet) => {
+        tintCtx.drawImage(sheet, sourceX, sourceY, frameSize, frameSize, 0, 0, frameSize, frameSize);
+      });
       tintCtx.globalCompositeOperation = "source-in";
       tintCtx.fillStyle = color;
       tintCtx.fillRect(0, 0, frameSize, frameSize);
@@ -957,7 +1065,6 @@
   }
 
   function drawCharacterPreview(target, character, time, isFeature, offset) {
-    const sheet = characterSheets[character.id];
     const previewWidth = target.canvas.width;
     const previewHeight = target.canvas.height;
     target.clearRect(0, 0, previewWidth, previewHeight);
@@ -980,7 +1087,9 @@
     target.beginPath();
     target.ellipse(previewWidth / 2, previewHeight * 0.83, previewWidth * 0.22, previewHeight * 0.035, 0, 0, Math.PI * 2);
     target.fill();
-    if (!sheet || !sheet.complete || sheet.naturalWidth === 0) return;
+
+    const layers = loadedLayers(character.id);
+    if (!layers.length) return;
 
     const phase = (time + offset) % 4.8;
     const attacking = isFeature && phase > 4.05;
@@ -991,17 +1100,19 @@
     const drawSize = Math.min(previewWidth, previewHeight) * (isFeature ? 0.73 : 0.76);
     const drawX = (previewWidth - drawSize) / 2;
     const drawY = (previewHeight - drawSize) / 2 + previewHeight * 0.035;
-    target.drawImage(
-      sheet,
-      column * frameSize,
-      row * frameSize,
-      frameSize,
-      frameSize,
-      drawX,
-      drawY,
-      drawSize,
-      drawSize,
-    );
+    layers.forEach((sheet) => {
+      target.drawImage(
+        sheet,
+        column * frameSize,
+        row * frameSize,
+        frameSize,
+        frameSize,
+        drawX,
+        drawY,
+        drawSize,
+        drawSize,
+      );
+    });
   }
 
   function drawMenuPreviews(time) {
@@ -1026,8 +1137,8 @@
     ctx.closePath();
   }
 
-  /** Petite étiquette avec le pseudo, flottant au-dessus du ninja. */
-  function drawNameplate(text, color, centerX, spriteTop, isSelf) {
+  /** Petite étiquette avec le pseudo et la barre de vie, au-dessus du héros. */
+  function drawNameplate(text, color, hp, centerX, spriteTop, isSelf) {
     ctx.font = "700 11px " + FONT_STACK;
     const paddingX = 7;
     const dotRadius = 3.5;
@@ -1054,6 +1165,19 @@
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#fff";
     ctx.fillText(text, x + paddingX + dotRadius * 2 + dotGap, y + boxHeight / 2 + 0.5);
+
+    // Barre de vie sous le pseudo, pour chaque joueur.
+    const ratio = clamp((hp == null ? MAX_HP : hp) / MAX_HP, 0, 1);
+    const barHeight = 5;
+    const barY = y + boxHeight + 3;
+    roundRectPath(x, barY, boxWidth, barHeight, 2.5);
+    ctx.fillStyle = "rgba(6, 18, 34, 0.72)";
+    ctx.fill();
+    if (ratio > 0) {
+      roundRectPath(x + 1, barY + 1, Math.max(1, (boxWidth - 2) * ratio), barHeight - 2, 1.5);
+      ctx.fillStyle = hpColor(ratio);
+      ctx.fill();
+    }
   }
 
   /** Flèche au bord de l'écran pour les joueurs hors du champ de la caméra. */
@@ -1070,7 +1194,7 @@
     ctx.lineTo(toRight ? -6 : 6, -9);
     ctx.lineTo(toRight ? -6 : 6, 9);
     ctx.closePath();
-    ctx.fillStyle = peer.color;
+    ctx.fillStyle = accentFor(peer.character);
     ctx.globalAlpha = 0.9;
     ctx.fill();
     ctx.restore();
@@ -1108,17 +1232,18 @@
         return;
       }
 
+      const accent = accentFor(peer.character);
       const { column, row } = getRemoteFrame(peer);
-      drawNinja(peer.character, column, row, peer.f, centerX, drawY, peer.color, 0.34);
+      drawNinja(peer.character, column, row, peer.f, centerX, drawY, accent, 0.34);
       drawCharacterAttack(
         characterFor(peer.character),
         peer.a,
         peer.f,
         centerX,
         peer.ry + player.height * 0.47,
-        peer.color,
+        accent,
       );
-      drawNameplate(peer.name, peer.color, centerX, drawY + 6, false);
+      drawNameplate(peer.name, accent, peer.hp, centerX, drawY + 6, false);
     });
   }
 
@@ -1262,10 +1387,11 @@
     ctx.fill();
 
     drawPlayer();
-    // Notre propre pseudo, pour vérifier d'un coup d'œil comment on apparaît.
+    // Notre propre pseudo et notre barre de vie, pour vérifier d'un coup d'œil.
     drawNameplate(
       identity.name,
-      identity.color,
+      accentFor(identity.character),
+      player.hp,
       player.x + player.width / 2 - camX,
       player.y - spriteTopPadding + 6,
       true,
@@ -1367,13 +1493,10 @@
   const savedName = stored(STORAGE_NAME, "");
   identity.name = savedName ? cleanName(savedName) : "";
   identity.character = cleanCharacter(stored(STORAGE_CHARACTER, "ninja"));
-  identity.color = cleanColor(stored(STORAGE_COLOR, characterFor(identity.character).accent));
   player.speed = characterFor(identity.character).speed;
   player.jumpStrength = characterFor(identity.character).jumpStrength;
   selectedCharacter = identity.character;
-  selectedColor = identity.color;
 
-  buildColorSwatches();
   buildCharacterCards();
   resize();
   connect();

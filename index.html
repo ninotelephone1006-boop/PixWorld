@@ -290,6 +290,23 @@
         white-space: nowrap;
       }
 
+      .players-list .hp-meter {
+        flex: none;
+        width: 34px;
+        height: 5px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgb(4 14 28 / 55%);
+        box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%);
+      }
+
+      .players-list .hp-meter i {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: #6fe07e;
+      }
+
       .players-list .player-class {
         max-width: 58px;
         overflow: hidden;
@@ -502,10 +519,6 @@
                   required
                 />
               </label>
-              <div class="menu-field">
-                <span class="menu-label">Couleur de ton aura</span>
-                <div class="menu-colors" id="menu-colors" role="group" aria-label="Couleur du personnage"></div>
-              </div>
             </div>
 
             <div class="menu-actions">
