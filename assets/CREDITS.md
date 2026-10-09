@@ -1,16 +1,26 @@
 # Crédits et licences des ressources
 
-## Personnages — spritesheets CC0
+## Personnages — spritesheets CC0 (Kage et Yume)
 
-- **Corps de base :** `ninja-black-32x32.png` (Kage, et corps de Sora et Raiden).
-- **Surcouches d'arme :** `characters/ninja-bow-32x32.png` (arc de Sora) et `characters/ninja-sword-32x32.png` (sabre de Raiden). Ces deux feuilles du pack d'origine **ne contiennent que l'arme** : PixWorld les compose par-dessus le corps du ninja, image par image. C'est le montage prévu par les auteurs — dessinées seules, elles n'affichent que l'arme.
-- **Héroïne complète :** `characters/ninja-purple-32x32.png` (Yume).
+- **Kage :** `ninja-black-32x32.png`.
+- **Yume :** `characters/ninja-purple-32x32.png`.
 - **Création / adaptation :** Morgan McGuire (2018), d'après l'illustration de DezrasDragons.
-- **Sources GitHub :** [ninja noir](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-black-32x32.png), [ninja à l'arc](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-bow-32x32.png), [ninja au sabre](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-sword-32x32.png), [ninja violet](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-purple-32x32.png).
+- **Sources GitHub :** [ninja noir](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-black-32x32.png), [ninja violet](https://github.com/morgan3d/quadplay/blob/main/sprites/ninja-purple-32x32.png).
 - **Licence :** [CC0 1.0 / domaine public](https://creativecommons.org/publicdomain/zero/1.0/) — attribution non obligatoire ; crédit conservé par courtoisie. Les fichiers de métadonnées source dans le dépôt quadplay précisent explicitement la licence CC0 pour chaque sprite.
-- **Animations :** feuilles de 256 × 128 px, cellules de 32 × 32 px ; idle, course, saut et attaque. Les effets de shuriken, flèche, coupe et orbe sont dessinés dans PixWorld.
+- **Animations :** feuilles de 256 × 128 px, cellules de 32 × 32 px ; idle, course, saut, attaque, blessé et K.O. Les effets de shuriken, flèche, coupe et orbe sont dessinés dans PixWorld.
 
-Le ninja original provient de [OpenGameArt — Ninja Animated](https://opengameart.org/content/ninja-animated-0). Les feuilles d'arc et de sabre viennent des variantes correspondantes du même pack CC0.
+Le ninja original provient de [OpenGameArt — Ninja Animated](https://opengameart.org/content/ninja-animated-0).
+
+## Personnages — sprites originaux PixWorld (Sora et Raiden)
+
+- **Fichiers :** `characters/archer-32x32.png` (Sora, archère) et `characters/samurai-32x32.png` (Raiden, samouraï).
+- **Création :** dessinés pour PixWorld (pixel art original, même grille et même disposition d'animations que les feuilles ci-dessus : idle, course, saut, attaque, blessé, K.O.). Ils sont générés depuis des calques ASCII par `tools/make-sprites.py` (Pillow), ce qui permet de les retoucher facilement.
+- **Licence :** [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), comme le reste des sprites du jeu.
+
+## Effets sonores — ZzFX
+
+- **Fichier :** `src/audio.js` synthétise tous les sons du jeu à la volée ; aucun fichier audio n'est embarqué.
+- **Moteur :** adaptation de [ZzFX](https://github.com/KilledByAPixel/ZzFX) (« Zuper Zmall Zound Zynth ») de Frank Force, licence [MIT](https://github.com/KilledByAPixel/ZzFX/blob/master/LICENSE), © 2019 Frank Force. Les presets (paramètres de chaque son) sont propres à PixWorld.
 
 ## Décor « Sunny Land » (parallaxe)
 

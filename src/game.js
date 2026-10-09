@@ -2,12 +2,15 @@
  * PixWorld — jeu de plateforme 2D multijoueur.
  *
  * Chaque visiteur choisit son héros et son pseudo dans un menu titre dédié.
- * Les quatre combattants ont leur propre animation et leur attaque visuelle ;
+ * Les quatre combattants ont leur propre feuille de sprite et leur attaque ;
  * Échap rouvre le menu en pause pendant la partie.
- * En multijoueur, héros, attaques, points de vie et positions sont synchronisés
- * en temps réel. Chaque joueur porte une barre de vie : les attaques des
- * autres (projectiles et coups de mêlée) nous enlèvent des points, et on
- * réapparaît en pleine forme après un K.O.
+ *
+ * Combat : chaque joueur porte une barre de vie. Les attaques des autres
+ * (projectiles et coups de mêlée) nous enlèvent des points, nous repoussent
+ * et déclenchent flash, secousse de caméra, étincelles et chiffres de dégâts.
+ * À 0, une courte séquence de K.O. précède la réapparition au camp de départ.
+ * Tout est accompagné d'effets sonores synthétisés (src/audio.js) et
+ * d'effets visuels (src/effects.js).
  *
  * Le script reste utilisable sans serveur (solo, ou entre onglets d'un même
  * navigateur) : voir src/net.js pour les détails des transports.
@@ -31,6 +34,9 @@
   const menuStatus = document.querySelector("#menu-status");
   const menuHint = document.querySelector("#menu-hint");
   const menuWorldCharacter = document.querySelector("#menu-world-character");
+  const menuVolume = document.querySelector("#menu-volume");
+  const menuVolumeValue = document.querySelector("#menu-volume-value");
+  const menuMute = document.querySelector("#menu-mute");
   const characterRoster = document.querySelector("#character-roster");
   const featuredPreview = document.querySelector("#menu-featured-preview");
   const featuredPreviewContext = featuredPreview.getContext("2d");
@@ -42,7 +48,11 @@
   const playersTitle = document.querySelector(".players-title");
   const playersMode = document.querySelector("#players-mode");
   const playersRename = document.querySelector("#players-rename");
+  const soundToggle = document.querySelector("#sound-toggle");
   const toasts = document.querySelector("#toasts");
+
+  const audio = window.PixWorldAudio;
+  const fx = window.PixWorldEffects.create();
 
   const STORAGE_NAME = "pixworld.name";
   const STORAGE_CHARACTER = "pixworld.character";
@@ -53,26 +63,24 @@
   const REGEN_DELAY = 5; // secondes sans dégâts avant de se soigner
   const REGEN_RATE = 9; // points de vie par seconde
   const RESPAWN_INVULNERABILITY = 1.6;
+  const KO_DURATION = 1.15; // séquence de K.O. avant la réapparition
+  const HURT_DURATION = 0.28; // image « blessé » après un coup
+  const FLASH_DURATION = 0.09; // silhouette blanche après un coup
+  const LOW_HP = 35; // en dessous : vignette rouge et battements de cœur
+  const COMBO_FINISHER_BONUS = 5; // la 3e coupe de Raiden frappe plus fort
 
   // ─────────────────────────── Sprites et décor ───────────────────────────
-  // Chaque héros a un corps (`sprite`) et, pour Sora et Raiden, une surcouche
-  // d'arme (`weaponSprite`) dessinée par-dessus : les feuilles d'arc et de
-  // sabre du pack CC0 ne contiennent que l'arme, pas le personnage.
+  // Chaque héros possède sa feuille complète : les ninjas CC0 pour Kage et
+  // Yume, et des sprites originaux pour Sora (archère) et Raiden (samouraï).
   const characterSheets = Object.create(null);
   CHARACTERS.list.forEach((character) => {
-    const body = new Image();
-    body.src = character.sprite;
-    const entry = { body, weapon: null };
-    if (character.weaponSprite) {
-      const weapon = new Image();
-      weapon.src = character.weaponSprite;
-      entry.weapon = weapon;
-    }
-    characterSheets[character.id] = entry;
+    const sheet = new Image();
+    sheet.src = character.sprite;
+    characterSheets[character.id] = sheet;
   });
 
   // Décor pixel art « Sunny Land » (Ansimuz, CC0) : ciel, collines et
-  // tuiles de sol, dessinées en parallaxe derrière le ninja.
+  // tuiles de sol, dessinées en parallaxe derrière les héros.
   const skyLayer = new Image();
   skyLayer.src = "assets/background/sky-back.png";
   const hillsLayer = new Image();
@@ -104,9 +112,11 @@
   const spriteScale = 4;
   const spriteDrawSize = frameSize * spriteScale;
   const spriteTopPadding = 9 * spriteScale;
+  // Cellules spéciales des feuilles : blessé et K.O. (colonne 5).
+  const HURT_FRAME = { column: 5, row: 0 };
+  const DEAD_FRAME = { column: 5, row: 3 };
 
-  // Le monde est maintenant partagé : tout le monde parcourt exactement le
-  // même niveau, quelle que soit la taille de son écran.
+  // Le monde est partagé : tout le monde parcourt exactement le même niveau.
   const WORLD_WIDTH = 2600;
   const SEND_INTERVAL = 0.05; // 20 envois de position par seconde
   const SPAWN_X = 112;
@@ -118,6 +128,7 @@
     height: 60,
     velocityX: 0,
     velocityY: 0,
+    knockback: 0,
     speed: 340,
     jumpStrength: 700,
     grounded: true,
@@ -125,10 +136,21 @@
     animationTime: 0,
     attackTime: 0,
     attackSerial: 0,
+    shotTimer: -1, // délai avant le départ du projectile (-1 : rien en attente)
+    meleeSerial: 0,
+    meleeHits: null,
     landingTime: 0,
+    hurtTime: 0,
+    flashTime: 0,
+    deadTime: 0,
     hp: MAX_HP,
     invulnerable: 0,
     timeSinceDamage: 99,
+    regenAnnounced: true,
+    stepTimer: 0,
+    stepCount: 0,
+    heartbeatTimer: 0,
+    airTime: 0,
   };
 
   let width = 0;
@@ -195,7 +217,7 @@
     return CHARACTERS.get(cleanCharacter(id));
   }
 
-  /** Couleur d'identification : toujours l'accent du héros choisi. */
+  /** Couleur d'identification dans l'interface : l'accent du héros choisi. */
   function accentFor(id) {
     return characterFor(id).accent;
   }
@@ -204,6 +226,51 @@
   function hash(n) {
     const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
     return x - Math.floor(x);
+  }
+
+  /** Centre horizontal (monde) et vertical d'un joueur, pour les effets. */
+  function playerCenter() {
+    return { x: player.x + player.width / 2, y: player.y + player.height / 2 };
+  }
+
+  function peerCenter(peer) {
+    return { x: peer.rx + player.width / 2, y: peer.ry + player.height / 2 };
+  }
+
+  // ───────────────────────────── Son ─────────────────────────────
+  function sfx(name, options) {
+    audio.play(name, options);
+  }
+
+  /** Son d'un autre joueur : balance et volume selon sa position. */
+  function sfxAt(name, worldX, options) {
+    audio.playAt(name, worldX, options);
+  }
+
+  function updateSoundButtons() {
+    const muted = audio.muted;
+    const label = muted ? "Activer le son (M)" : "Couper le son (M)";
+    [soundToggle, menuMute].forEach((button) => {
+      if (!button) return;
+      button.textContent = muted ? "🔇" : "🔊";
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.setAttribute("aria-pressed", String(muted));
+    });
+    if (menuVolume) {
+      menuVolume.value = String(Math.round(audio.volume * 100));
+      menuVolume.style.setProperty("--volume", Math.round(audio.volume * 100) + "%");
+      menuVolume.disabled = muted;
+    }
+    if (menuVolumeValue) menuVolumeValue.textContent = muted ? "muet" : Math.round(audio.volume * 100) + " %";
+  }
+
+  function toggleMute() {
+    audio.unlock();
+    const muted = audio.toggleMuted();
+    updateSoundButtons();
+    if (!muted) sfx("uiToggleOn");
+    toast(muted ? "Son coupé" : "Son activé", true);
   }
 
   // ──────────────────────────── Interface ────────────────────────────
@@ -216,7 +283,10 @@
       card.style.setProperty("--hero-accent", character.accent);
       card.setAttribute("aria-label", character.name + ", " + character.role + " : " + character.attackName);
       card.setAttribute("aria-pressed", String(character.id === selectedCharacter));
-      card.addEventListener("click", () => selectCharacter(character.id));
+      card.addEventListener("click", () => selectCharacter(character.id, true));
+      card.addEventListener("pointerenter", () => {
+        if (card.getAttribute("aria-pressed") !== "true") sfx("uiHover", { volume: 0.6 });
+      });
 
       const artWrap = document.createElement("span");
       artWrap.className = "character-art-wrap";
@@ -255,8 +325,15 @@
     menuWorldCharacter.textContent = character.name + " · " + character.role;
   }
 
-  function selectCharacter(id) {
-    selectedCharacter = cleanCharacter(id);
+  function selectCharacter(id, byUser) {
+    const next = cleanCharacter(id);
+    if (byUser && next !== selectedCharacter) {
+      sfx("uiSelect");
+      // Petit aperçu sonore de l'attaque du héros choisi.
+      const character = characterFor(next);
+      if (character.attackSound) audio.sequence([[character.attackSound, 120, { volume: 0.45 }]]);
+    }
+    selectedCharacter = next;
     updateCharacterCards();
   }
 
@@ -272,20 +349,27 @@
     return { label: "solo", tone: "solo", text: "Mode solo : lance npm start pour jouer en ligne." };
   }
 
+  let lastMode = null;
   function applyMode(mode) {
     const info = describeMode(mode);
     playersPanel.dataset.mode = mode;
     playersMode.textContent = info.label;
     if (!playing) setStatus(info.text, info.tone);
+    if (lastMode === "reconnect" && mode === "online") {
+      sfx("connected");
+      toast("Connexion rétablie", true);
+    }
+    lastMode = mode;
     panelDirty = true;
   }
 
-  function toast(text) {
+  function toast(text, silent) {
     const item = document.createElement("div");
     item.className = "toast";
     item.textContent = text;
     toasts.append(item);
     while (toasts.children.length > 4) toasts.firstElementChild.remove();
+    if (!silent) sfx("toast", { volume: 0.7 });
     setTimeout(() => {
       item.classList.add("fade");
       setTimeout(() => item.remove(), 400);
@@ -309,11 +393,11 @@
     playersList.textContent = "";
 
     const rows = [
-      { name: identity.name, character: identity.character, hp: player.hp, self: true },
+      { name: identity.name, character: identity.character, hp: player.hp, self: true, dead: player.deadTime > 0 },
     ];
     Array.from(others.values())
       .sort((a, b) => a.name.localeCompare(b.name, "fr"))
-      .forEach((peer) => rows.push({ name: peer.name, character: peer.character, hp: peer.hp, self: false }));
+      .forEach((peer) => rows.push({ name: peer.name, character: peer.character, hp: peer.hp, self: false, dead: peer.dead }));
 
     rows.forEach((row) => {
       const li = document.createElement("li");
@@ -329,7 +413,7 @@
 
       const meter = document.createElement("span");
       meter.className = "hp-meter";
-      meter.title = "Vie " + Math.round(row.hp) + " / " + MAX_HP;
+      meter.title = row.dead ? "K.O." : "Vie " + Math.round(row.hp) + " / " + MAX_HP;
       const fill = document.createElement("i");
       const ratio = clamp(row.hp / MAX_HP, 0, 1);
       fill.style.width = Math.round(ratio * 100) + "%";
@@ -338,7 +422,7 @@
 
       const role = document.createElement("span");
       role.className = "player-class";
-      role.textContent = characterFor(row.character).role;
+      role.textContent = row.dead ? "K.O." : characterFor(row.character).role;
       role.title = characterFor(row.character).attackName;
 
       li.append(swatch, name, meter, role);
@@ -381,6 +465,7 @@
     void gameMenu.offsetWidth;
     gameMenu.classList.add("is-opening");
     if (net) applyMode(net.mode);
+    updateSoundButtons();
     if (menuMode === "pause") {
       menuPlayLabel.parentElement.focus({ preventScroll: true });
     } else {
@@ -422,6 +507,11 @@
     playing = true;
     keys.clear();
     panelDirty = true;
+    audio.sequence([
+      ["uiConfirm", 0],
+      ["uiSelect", 140, { pitch: 1.25, volume: 0.6 }],
+      ["uiSelect", 260, { pitch: 1.5, volume: 0.6 }],
+    ]);
   }
 
   function resumeGame() {
@@ -431,6 +521,7 @@
     playing = true;
     keys.clear();
     panelDirty = true;
+    sfx("uiBack");
   }
 
   function returnToTitle() {
@@ -444,13 +535,22 @@
     player.y = groundY - player.height;
     player.velocityX = 0;
     player.velocityY = 0;
+    player.knockback = 0;
     player.grounded = true;
     player.attackTime = 0;
     player.attackSerial = 0;
+    player.shotTimer = -1;
     player.hp = MAX_HP;
     player.invulnerable = 0;
+    player.hurtTime = 0;
+    player.flashTime = 0;
+    player.deadTime = 0;
     player.timeSinceDamage = 99;
+    player.regenAnnounced = true;
     projectiles.length = 0;
+    fx.clear();
+    camX = 0;
+    sfx("uiPause");
     connect();
     openMenu("start");
     panelDirty = true;
@@ -464,6 +564,7 @@
       playing = true;
       keys.clear();
       panelDirty = true;
+      sfx("uiConfirm", { volume: 0.8 });
     } else {
       beginGame();
     }
@@ -471,7 +572,25 @@
 
   menuClose.addEventListener("click", resumeGame);
   menuHome.addEventListener("click", returnToTitle);
-  playersRename.addEventListener("click", () => openMenu("pause"));
+  playersRename.addEventListener("click", () => {
+    sfx("uiPause");
+    openMenu("pause");
+  });
+  menuNameInput.addEventListener("input", () => sfx("uiType", { volume: 0.8 }));
+  [menuClose, menuHome, playersRename, menuForm.querySelector(".menu-primary")].forEach((button) => {
+    if (button) button.addEventListener("pointerenter", () => sfx("uiHover", { volume: 0.5 }));
+  });
+  if (soundToggle) soundToggle.addEventListener("click", toggleMute);
+  if (menuMute) menuMute.addEventListener("click", toggleMute);
+  if (menuVolume) {
+    menuVolume.addEventListener("input", () => {
+      audio.unlock();
+      audio.setVolume(Number(menuVolume.value) / 100);
+      menuVolume.style.setProperty("--volume", Math.round(audio.volume * 100) + "%");
+      if (menuVolumeValue) menuVolumeValue.textContent = Math.round(audio.volume * 100) + " %";
+    });
+    menuVolume.addEventListener("change", () => sfx("uiSelect", { volume: 0.7 }));
+  }
 
   // ───────────────────────────── Réseau ─────────────────────────────
   function handleNetworkMessage(message) {
@@ -486,7 +605,8 @@
         const isNew = addPeer(message.player);
         if (isNew && message.player) {
           const peer = others.get(message.player.id);
-          toast((peer ? peer.name : "Quelqu'un") + " a rejoint la partie");
+          toast((peer ? peer.name : "Quelqu'un") + " a rejoint la partie", true);
+          sfx("playerJoin");
         }
         panelDirty = true;
         break;
@@ -495,7 +615,8 @@
         const peer = others.get(message.id);
         if (peer) {
           others.delete(message.id);
-          toast(peer.name + " a quitté la partie");
+          toast(peer.name + " a quitté la partie", true);
+          sfx("playerLeave");
           panelDirty = true;
         }
         break;
@@ -515,7 +636,8 @@
       }
       case "disconnected": {
         others.clear();
-        toast("Connexion perdue");
+        toast("Connexion perdue", true);
+        sfx("connectionLost");
         panelDirty = true;
         break;
       }
@@ -537,6 +659,8 @@
       name: cleanName(data.name),
       character: cleanCharacter(data.character || data.c),
       hp: MAX_HP,
+      hpKnown: false,
+      dead: false,
       x: player.x,
       gap: 0,
       f: 1,
@@ -545,10 +669,17 @@
       g: true,
       a: 0,
       attackSerial: 0,
-      lastMeleeHitSerial: 0,
+      meleeSerial: 0,
+      meleeHits: null,
+      shotTimer: -1,
+      shotStyle: null,
       rx: player.x,
       ry: groundY - player.height,
       animTime: 0,
+      hurtTime: 0,
+      flashTime: 0,
+      stepTimer: 0,
+      lastHitByUsAt: -99,
       seen: performance.now(),
     });
     return true;
@@ -565,6 +696,7 @@
       peer.rx = clamp(Number(state.x) || 0, 0, WORLD_WIDTH - player.width);
       peer.ry = groundY - player.height - (Number(state.gap) || 0);
     }
+    const wasGrounded = peer.g;
     peer.x = clamp(Number(state.x) || 0, 0, WORLD_WIDTH - player.width);
     peer.gap = Math.max(0, Number(state.gap) || 0);
     peer.f = Number(state.f) >= 0 ? 1 : -1;
@@ -580,20 +712,99 @@
       peer.name = cleanName(state.name);
       panelDirty = true;
     }
+
+    // Saut et atterrissage des autres joueurs : son spatialisé + poussière.
+    const center = peerCenter(peer);
+    if (peer.hpKnown && !peer.dead) {
+      if (wasGrounded && !peer.g && peer.vy < -100) sfxAt("jump", center.x, { volume: 0.5 });
+      if (!wasGrounded && peer.g) {
+        sfxAt("land", center.x, { volume: 0.6 });
+        fx.dust(center.x, groundY, { count: 5 });
+      }
+    }
+
     const nextHp = Number(state.hp);
-    if (Number.isFinite(nextHp) && clamp(nextHp, 0, MAX_HP) !== peer.hp) {
-      peer.hp = clamp(nextHp, 0, MAX_HP);
+    if (Number.isFinite(nextHp)) {
+      const hp = clamp(nextHp, 0, MAX_HP);
+      if (hp !== peer.hp) {
+        if (peer.hpKnown && hp < peer.hp && !peer.dead) onPeerDamaged(peer, peer.hp - hp);
+        peer.hp = hp;
+        panelDirty = true;
+      }
+      peer.hpKnown = true;
+    }
+
+    // Séquence de K.O. du joueur distant, puis réapparition.
+    const dead = Boolean(state.d);
+    if (dead !== peer.dead) {
+      peer.dead = dead;
+      if (dead) onPeerKnockedOut(peer);
+      else onPeerRespawned(peer);
       panelDirty = true;
     }
+
     // Le compteur évite de rejouer les effets d'attaque reçus dans chaque snapshot.
     const attackSerial = Math.max(0, Math.floor(Number(state.n) || 0));
     if (attackSerial > peer.attackSerial) {
       peer.attackSerial = attackSerial;
-      spawnPeerAttack(peer);
+      onPeerAttack(peer);
     }
     // Une attaque relancée prend le pas sur celle en cours.
     peer.a = Math.max(peer.a, Number(state.a) || 0);
     peer.seen = performance.now();
+  }
+
+  function onPeerDamaged(peer, amount) {
+    const center = peerCenter(peer);
+    peer.hurtTime = HURT_DURATION;
+    peer.flashTime = FLASH_DURATION;
+    fx.text(center.x, peer.ry - 6, "-" + Math.round(amount), {
+      color: amount >= 20 ? "#ffb347" : "#ffffff",
+      size: amount >= 20 ? 19 : 15,
+    });
+    // Si c'est nous qui venons de le toucher, petite secousse de confirmation.
+    if (performance.now() - peer.lastHitByUsAt < 400) fx.shake(2.5, 0.12);
+  }
+
+  function onPeerKnockedOut(peer) {
+    const center = peerCenter(peer);
+    const color = accentFor(peer.character);
+    fx.knockout(center.x, center.y, color);
+    fx.text(center.x, peer.ry - 18, "K.O. !", { color: "#ffd166", size: 22, vy: -40, duration: 1.2 });
+    sfxAt("ko", center.x, { volume: 0.8 });
+    sfxAt("koBoom", center.x, { volume: 0.7 });
+    const onScreen = Math.abs(center.x - (camX + width / 2)) < width;
+    if (onScreen) fx.shake(6, 0.35);
+    if (performance.now() - peer.lastHitByUsAt < 1500) {
+      const me = playerCenter();
+      fx.text(me.x, player.y - 30, "K.O. sur " + peer.name + " !", { color: "#ffe08a", size: 18, vy: -45, duration: 1.4 });
+      audio.sequence([["koEnemy", 150, { important: true }]]);
+      toast("Tu as mis " + peer.name + " K.O. !", true);
+    }
+    peer.a = 0;
+  }
+
+  function onPeerRespawned(peer) {
+    // Le joueur réapparaît au camp : on saute directement à sa position.
+    peer.rx = peer.x;
+    peer.ry = groundY - player.height - peer.gap;
+    const center = peerCenter(peer);
+    fx.respawn(center.x, peer.ry + player.height, accentFor(peer.character));
+    sfxAt("respawn", center.x, { volume: 0.6 });
+  }
+
+  function onPeerAttack(peer) {
+    const character = characterFor(peer.character);
+    const center = peerCenter(peer);
+    if (character.windupSound) sfxAt(character.windupSound, center.x, { volume: 0.7 });
+    if (character.attackStyle === "slash") {
+      const step = comboStep(peer.attackSerial);
+      sfxAt(step === 2 ? "slashHeavy" : "slash", center.x);
+      sfxAt("slashRing", center.x, { volume: 0.5, pitch: 1 + step * 0.08 });
+      return;
+    }
+    peer.shotTimer = character.projectileDelay || 0;
+    peer.shotStyle = character.attackStyle;
   }
 
   function connect() {
@@ -639,23 +850,92 @@
 
   // ──────────────────────── Barre de vie / dégâts ────────────────────────
 
-  /** Enlève des points de vie au joueur local ; K.O. → réapparition. */
-  function applyDamage(amount) {
-    if (!playing || player.invulnerable > 0) return;
+  /** Index de la coupe dans l'enchaînement de Raiden (0, 1, 2), partagé via le compteur d'attaque. */
+  function comboStep(serial) {
+    return Math.max(0, serial - 1) % 3;
+  }
+
+  function slashDamage(character, serial) {
+    return character.attackDamage + (comboStep(serial) === 2 ? COMBO_FINISHER_BONUS : 0);
+  }
+
+  /**
+   * Enlève des points de vie au joueur local.
+   * source : { x, facing, style, color } décrit le coup pour le recul et les effets.
+   */
+  function applyDamage(amount, source) {
+    if (!playing || player.invulnerable > 0 || player.deadTime > 0) return;
+    const character = characterFor(identity.character);
     player.hp = Math.max(0, player.hp - amount);
     player.timeSinceDamage = 0;
+    player.regenAnnounced = false;
+    player.hurtTime = HURT_DURATION;
+    player.flashTime = FLASH_DURATION;
     panelDirty = true;
-    if (player.hp <= 0) {
-      player.hp = MAX_HP;
-      player.x = SPAWN_X;
-      player.y = groundY - player.height;
-      player.velocityX = 0;
-      player.velocityY = 0;
-      player.grounded = true;
-      player.invulnerable = RESPAWN_INVULNERABILITY;
-      player.timeSinceDamage = 0;
-      toast("Tu as été mis K.O. · réapparition au camp de départ");
+
+    const me = playerCenter();
+    const style = source ? source.style : "shuriken";
+    const color = source ? source.color : "#ffffff";
+    const direction = source ? (source.facing != null ? source.facing : Math.sign(me.x - source.x) || 1) : 1;
+    const strength = source && source.knockback != null ? source.knockback : 200;
+    player.knockback = direction * strength;
+    if (player.grounded && strength >= 300) {
+      player.velocityY = -220;
+      player.grounded = false;
     }
+
+    fx.impact(me.x - direction * 10, me.y - 4, style, color, direction);
+    fx.text(me.x, player.y - 8, "-" + Math.round(amount), { color: "#ff6b6b", size: amount >= 20 ? 20 : 16 });
+    fx.flash({ color: "#ff3b3b", alpha: Math.min(0.32, 0.1 + amount / 90), duration: 0.16 });
+    fx.shake(Math.min(10, 3 + amount * 0.3), 0.26);
+    sfx(player.hp > 0 && player.hp < LOW_HP ? "hurtCritical" : "hurt", { important: true });
+    if (source && source.hitSound) sfx(source.hitSound, { volume: 0.8 });
+
+    if (player.hp <= 0) startDeath(character);
+  }
+
+  function startDeath(character) {
+    const me = playerCenter();
+    player.hp = 0;
+    player.deadTime = KO_DURATION;
+    player.attackTime = 0;
+    player.shotTimer = -1;
+    // Le corps garde l'élan du coup fatal (recul, petit bond) et retombe.
+    player.knockback *= 1.4;
+    if (player.grounded) {
+      player.velocityY = -260;
+      player.grounded = false;
+    }
+    fx.knockout(me.x, me.y, character.accent);
+    fx.flash({ color: "#ffffff", alpha: 0.5, duration: 0.25 });
+    fx.shake(14, 0.5);
+    fx.text(me.x, player.y - 24, "K.O. !", { color: "#ffd166", size: 24, vy: -40, duration: 1.3 });
+    sfx("ko", { important: true });
+    sfx("koBoom", { important: true });
+    toast("Tu as été mis K.O. · réapparition au camp de départ", true);
+    panelDirty = true;
+  }
+
+  function respawn() {
+    const character = characterFor(identity.character);
+    player.hp = MAX_HP;
+    player.deadTime = 0;
+    player.x = SPAWN_X;
+    player.y = groundY - player.height;
+    player.velocityX = 0;
+    player.velocityY = 0;
+    player.knockback = 0;
+    player.grounded = true;
+    player.hurtTime = 0;
+    player.invulnerable = RESPAWN_INVULNERABILITY;
+    player.timeSinceDamage = 0;
+    player.regenAnnounced = true;
+    camX = clamp(player.x + player.width / 2 - width / 2, 0, Math.max(0, WORLD_WIDTH - width));
+    const me = playerCenter();
+    fx.respawn(me.x, player.y + player.height, character.accent);
+    fx.flash({ color: character.accent, alpha: 0.18, duration: 0.3 });
+    sfx("respawn", { important: true });
+    panelDirty = true;
   }
 
   function hitsLocalPlayer(x, y, margin) {
@@ -668,23 +948,88 @@
     );
   }
 
-  /** Les coups de mêlée des autres (arc de coupe) peuvent nous atteindre. */
+  function hitsPeer(peer, x, y, margin) {
+    const m = margin == null ? 8 : margin;
+    return (
+      x > peer.rx - m &&
+      x < peer.rx + player.width + m &&
+      y > peer.ry - m &&
+      y < peer.ry + player.height + m
+    );
+  }
+
+  /** Zone frappée par une coupe : devant l'attaquant, sur toute sa hauteur. */
+  function inSlashReach(attackerX, attackerY, facing, serial, targetX, targetY) {
+    const reach = comboStep(serial) === 2 ? 128 : 112;
+    const dx = (targetX - attackerX) * facing;
+    const dy = Math.abs(targetY - attackerY);
+    return dx > -28 && dx < reach && dy < 82;
+  }
+
+  function slashWindow(character, timeLeft) {
+    const progress = 1 - Math.min(timeLeft, character.attackDuration) / character.attackDuration;
+    return progress >= 0.12 && progress <= 0.78;
+  }
+
+  /** Cibles déjà touchées par la coupe en cours d'un attaquant (une touche par cible et par coup). */
+  function meleeTargets(attacker, serial) {
+    if (attacker.meleeSerial !== serial) {
+      attacker.meleeSerial = serial;
+      attacker.meleeHits = new Set();
+    }
+    return attacker.meleeHits;
+  }
+
+  /** Les coups de mêlée des autres (arc de coupe) peuvent nous atteindre, et toucher d'autres joueurs. */
   function checkMeleeHits() {
     others.forEach((peer) => {
       const character = characterFor(peer.character);
-      if (character.attackStyle !== "slash" || peer.a <= 0) return;
-      if (peer.lastMeleeHitSerial >= peer.attackSerial) return;
-      const progress = 1 - Math.min(peer.a, character.attackDuration) / character.attackDuration;
-      if (progress < 0.12 || progress > 0.78) return;
-      const peerX = peer.rx + player.width / 2;
-      const localX = player.x + player.width / 2;
-      const dx = (localX - peerX) * peer.f;
-      const dy = Math.abs(player.y + player.height / 2 - (peer.ry + player.height / 2));
-      if (dx > -28 && dx < 112 && dy < 82) {
-        peer.lastMeleeHitSerial = peer.attackSerial;
-        applyDamage(character.attackDamage);
+      if (character.attackStyle !== "slash" || peer.a <= 0 || peer.dead) return;
+      if (!slashWindow(character, peer.a)) return;
+      const hits = meleeTargets(peer, peer.attackSerial);
+      const attacker = peerCenter(peer);
+      const me = playerCenter();
+      if (!hits.has("self") && inSlashReach(attacker.x, attacker.y, peer.f, peer.attackSerial, me.x, me.y)) {
+        hits.add("self");
+        applyDamage(slashDamage(character, peer.attackSerial), {
+          x: attacker.x,
+          facing: peer.f,
+          style: "slash",
+          color: character.accent,
+          knockback: character.knockback,
+          hitSound: character.hitSound,
+        });
       }
+      // Coup porté à un autre joueur : on montre l'impact, lui fera ses comptes.
+      others.forEach((target) => {
+        if (target === peer || target.dead || hits.has(target.id)) return;
+        const victim = peerCenter(target);
+        if (inSlashReach(attacker.x, attacker.y, peer.f, peer.attackSerial, victim.x, victim.y)) {
+          hits.add(target.id);
+          fx.impact(victim.x, victim.y - 4, "slash", character.accent, peer.f);
+          sfxAt(character.hitSound, victim.x, { volume: 0.7 });
+        }
+      });
     });
+
+    // Notre propre coupe : impact visuel immédiat sur les joueurs à portée.
+    const mine = characterFor(identity.character);
+    if (mine.attackStyle === "slash" && player.attackTime > 0 && player.deadTime === 0 && slashWindow(mine, player.attackTime)) {
+      const hits = meleeTargets(player, player.attackSerial);
+      const me = playerCenter();
+      others.forEach((target) => {
+        if (target.dead || hits.has(target.id)) return;
+        const victim = peerCenter(target);
+        if (inSlashReach(me.x, me.y, player.facing, player.attackSerial, victim.x, victim.y)) {
+          hits.add(target.id);
+          target.lastHitByUsAt = performance.now();
+          fx.impact(victim.x, victim.y - 4, "slash", mine.accent, player.facing);
+          fx.shake(3, 0.14);
+          sfx(mine.hitSound);
+          sfx("impactSpark", { volume: 0.6 });
+        }
+      });
+    }
   }
 
   function update(delta) {
@@ -692,38 +1037,44 @@
       player.animationTime += delta;
       player.attackTime = Math.max(0, player.attackTime - delta);
       player.landingTime = Math.max(0, player.landingTime - delta);
-      player.invulnerable = Math.max(0, player.invulnerable - delta);
-      player.timeSinceDamage += delta;
-      if (player.timeSinceDamage >= REGEN_DELAY && player.hp < MAX_HP) {
-        player.hp = Math.min(MAX_HP, player.hp + REGEN_RATE * delta);
+      player.hurtTime = Math.max(0, player.hurtTime - delta);
+      player.flashTime = Math.max(0, player.flashTime - delta);
+      if (player.invulnerable > 0) {
+        player.invulnerable = Math.max(0, player.invulnerable - delta);
+        if (player.invulnerable === 0) sfx("shieldOff", { volume: 0.6 });
       }
+      player.timeSinceDamage += delta;
 
-      const direction = Number(isRightPressed()) - Number(isLeftPressed());
-      player.velocityX = direction * player.speed;
-      if (direction !== 0) player.facing = direction;
-      player.x += player.velocityX * delta;
-      player.x = clamp(player.x, 0, WORLD_WIDTH - player.width);
-
-      // Caméra qui suit le joueur, bornée au monde : parallaxe du décor.
-      const target = clamp(player.x + player.width / 2 - width / 2, 0, WORLD_WIDTH - width);
-      camX += (target - camX) * Math.min(1, delta * 10);
-
-      if (!player.grounded) {
-        player.velocityY += 1900 * delta;
-        player.y += player.velocityY * delta;
-
-        if (player.y + player.height >= groundY) {
-          player.y = groundY - player.height;
-          player.velocityY = 0;
-          player.grounded = true;
-          player.landingTime = 0.12;
-        }
+      if (player.deadTime > 0) {
+        player.deadTime = Math.max(0, player.deadTime - delta);
+        updateDeadBody(delta);
+        if (player.deadTime === 0) respawn();
+      } else {
+        updateLocalCombatTimers(delta);
+        updateLocalMovement(delta);
       }
     }
 
     updateOthers(delta);
     updateProjectiles(delta);
     checkMeleeHits();
+    fx.update(delta);
+
+    // Vignette rouge et battements quand la vie est basse.
+    const lowRatio = player.deadTime > 0 ? 0 : clamp(1 - player.hp / LOW_HP, 0, 1);
+    fx.setVignette(playing ? lowRatio : 0);
+    if (playing && lowRatio > 0 && player.deadTime === 0) {
+      player.heartbeatTimer -= delta;
+      if (player.heartbeatTimer <= 0) {
+        player.heartbeatTimer = 1.05 - lowRatio * 0.35;
+        audio.sequence([
+          ["heartbeat", 0, { volume: 0.5 + lowRatio * 0.5 }],
+          ["heartbeat", 150, { volume: 0.35 + lowRatio * 0.4, pitch: 0.9 }],
+        ]);
+      }
+    } else {
+      player.heartbeatTimer = 0;
+    }
 
     // La barre de vie du panneau suit les régénérations et les dégâts.
     const hpShown = Math.round(player.hp);
@@ -731,6 +1082,8 @@
       lastPanelHp = hpShown;
       panelDirty = true;
     }
+
+    audio.setListener(camX + width / 2, width / 2);
 
     // On garde le joueur annoncé pendant une pause, avec sa position gelée.
     sendTimer += delta;
@@ -747,7 +1100,112 @@
         c: identity.character,
         n: player.attackSerial,
         hp: Math.round(player.hp),
+        d: player.deadTime > 0,
       });
+    }
+  }
+
+  function updateLocalCombatTimers(delta) {
+    const character = characterFor(identity.character);
+
+    // Régénération : annonce et étincelles quand elle démarre.
+    if (player.timeSinceDamage >= REGEN_DELAY && player.hp < MAX_HP) {
+      if (!player.regenAnnounced) {
+        player.regenAnnounced = true;
+        const me = playerCenter();
+        fx.heal(me.x, player.y);
+        sfx("regen", { volume: 0.7 });
+      }
+      player.hp = Math.min(MAX_HP, player.hp + REGEN_RATE * delta);
+    }
+
+    // Projectile différé : le shuriken part après le geste, la flèche à la
+    // décoche, l'orbe à la fin de l'incantation.
+    if (player.shotTimer >= 0) {
+      player.shotTimer -= delta;
+      if (player.shotTimer <= 0) {
+        player.shotTimer = -1;
+        const origin = projectileOrigin(player.x, player.y, player.facing);
+        spawnProjectile(character, origin.x, origin.y, player.facing, character.accent, "self");
+        fx.muzzle(origin.x, origin.y, character.attackStyle, character.accent, player.facing);
+        if (character.attackSound) sfx(character.attackSound);
+        if (character.attackStyle === "arrow") sfx("arrowSwish", { volume: 0.6 });
+        if (character.attackStyle === "shuriken") sfx("shurikenRing", { volume: 0.5 });
+      }
+    }
+
+    // Étincelles le long de la coupe pendant la fenêtre active.
+    if (character.attackStyle === "slash" && player.attackTime > 0 && slashWindow(character, player.attackTime)) {
+      emitSlashSparks(playerCenter(), player.facing, character.accent, delta);
+    }
+  }
+
+  /** Pendant le K.O. : plus de contrôle, mais le recul s'amortit et la gravité s'applique. */
+  function updateDeadBody(delta) {
+    player.knockback *= Math.max(0, 1 - delta * 6);
+    if (Math.abs(player.knockback) < 4) player.knockback = 0;
+    player.velocityX = player.knockback;
+    player.x = clamp(player.x + player.velocityX * delta, 0, WORLD_WIDTH - player.width);
+    if (!player.grounded) {
+      player.velocityY += 1900 * delta;
+      player.y += player.velocityY * delta;
+      if (player.y + player.height >= groundY) {
+        player.y = groundY - player.height;
+        player.velocityY = 0;
+        player.grounded = true;
+        fx.dust(player.x + player.width / 2, groundY, { count: 8 });
+        sfx("land", { volume: 0.6, pitch: 0.85 });
+      }
+    }
+  }
+
+  function updateLocalMovement(delta) {
+    const direction = Number(isRightPressed()) - Number(isLeftPressed());
+    const stunned = player.hurtTime > HURT_DURATION * 0.55;
+    const walk = stunned ? 0 : direction * player.speed;
+    // Le recul s'ajoute à la marche puis s'amortit vite.
+    player.knockback *= Math.max(0, 1 - delta * 9);
+    if (Math.abs(player.knockback) < 4) player.knockback = 0;
+    player.velocityX = walk + player.knockback;
+    if (direction !== 0 && !stunned) player.facing = direction;
+    player.x += player.velocityX * delta;
+    player.x = clamp(player.x, 0, WORLD_WIDTH - player.width);
+
+    // Caméra qui suit le joueur, bornée au monde : parallaxe du décor.
+    const target = clamp(player.x + player.width / 2 - width / 2, 0, Math.max(0, WORLD_WIDTH - width));
+    camX += (target - camX) * Math.min(1, delta * 10);
+
+    if (!player.grounded) {
+      player.airTime += delta;
+      player.velocityY += 1900 * delta;
+      player.y += player.velocityY * delta;
+
+      if (player.y + player.height >= groundY) {
+        player.y = groundY - player.height;
+        const impact = player.velocityY;
+        player.velocityY = 0;
+        player.grounded = true;
+        player.landingTime = 0.12;
+        const me = playerCenter();
+        const heavy = impact > 900;
+        fx.dust(me.x, groundY, { count: heavy ? 10 : 6 });
+        sfx("land", { volume: heavy ? 1 : 0.7, pitch: heavy ? 0.9 : 1 });
+        if (heavy) fx.shake(2, 0.1);
+        player.airTime = 0;
+      }
+    } else if (Math.abs(walk) > 0.5) {
+      // Bruits de pas réguliers et petits nuages de poussière.
+      player.stepTimer -= delta;
+      if (player.stepTimer <= 0) {
+        player.stepTimer = 0.24;
+        player.stepCount++;
+        sfx("step", { volume: 0.8, pitch: player.stepCount % 2 ? 1 : 1.12 });
+        if (player.stepCount % 2 === 0) {
+          fx.dust(player.x + player.width / 2 - player.facing * 10, groundY, { count: 2, direction: player.facing });
+        }
+      }
+    } else {
+      player.stepTimer = 0.05;
     }
   }
 
@@ -756,10 +1214,62 @@
     others.forEach((peer) => {
       peer.animTime += delta;
       peer.a = Math.max(0, peer.a - delta);
+      peer.hurtTime = Math.max(0, peer.hurtTime - delta);
+      peer.flashTime = Math.max(0, peer.flashTime - delta);
       peer.rx += (peer.x - peer.rx) * Math.min(1, delta * 14);
       const targetY = groundY - player.height - peer.gap;
       peer.ry += (targetY - peer.ry) * Math.min(1, delta * 14);
+
+      const character = characterFor(peer.character);
+      const center = peerCenter(peer);
+
+      // Projectile différé des autres joueurs (même délai que chez eux).
+      if (peer.shotTimer >= 0) {
+        peer.shotTimer -= delta;
+        if (peer.shotTimer <= 0) {
+          peer.shotTimer = -1;
+          if (!peer.dead) {
+            const origin = projectileOrigin(peer.rx, peer.ry, peer.f);
+            spawnProjectile(character, origin.x, origin.y, peer.f, character.accent, peer.id);
+            fx.muzzle(origin.x, origin.y, character.attackStyle, character.accent, peer.f);
+            if (character.attackSound) sfxAt(character.attackSound, center.x);
+            if (character.attackStyle === "arrow") sfxAt("arrowSwish", center.x, { volume: 0.5 });
+          }
+        }
+      }
+
+      if (character.attackStyle === "slash" && peer.a > 0 && !peer.dead && slashWindow(character, peer.a)) {
+        emitSlashSparks(center, peer.f, character.accent, delta);
+      }
+
+      // Pas des autres joueurs, discrets et spatialisés.
+      if (peer.g && !peer.dead && Math.abs(peer.vx) > 0.5) {
+        peer.stepTimer -= delta;
+        if (peer.stepTimer <= 0) {
+          peer.stepTimer = 0.24;
+          sfxAt("step", center.x, { volume: 0.5 });
+        }
+      }
     });
+  }
+
+  function emitSlashSparks(center, facing, color, delta) {
+    // Environ 60 étincelles par seconde, indépendamment du framerate.
+    if (Math.random() > delta * 60) return;
+    const angle = (Math.random() - 0.5) * 1.6;
+    const radius = 40 + Math.random() * 18;
+    fx.sparks(center.x + facing * Math.cos(angle) * radius, center.y + Math.sin(angle) * radius, {
+      count: 1,
+      direction: facing,
+      color,
+      spread: 1.2,
+      minSpeed: 120,
+      maxSpeed: 320,
+    });
+  }
+
+  function projectileOrigin(x, y, facing) {
+    return { x: x + player.width / 2 + facing * 18, y: y + player.height * 0.46 };
   }
 
   function updateProjectiles(delta) {
@@ -768,21 +1278,61 @@
       projectile.x += projectile.speed * projectile.facing * delta;
       projectile.age += delta;
       projectile.life -= delta;
+
+      // Traînée : quelques particules par image selon le style.
+      projectile.trailTimer -= delta;
+      if (projectile.trailTimer <= 0) {
+        projectile.trailTimer = projectile.style === "orb" ? 0.03 : 0.022;
+        fx.trail(projectile.x, projectile.y, projectile.style, projectile.color, projectile.facing);
+      }
+
+      let remove = false;
       // Chaque client ne blesse que lui-même : la victime fait ses comptes.
-      if (!projectile.hitPlayer && projectile.owner !== "self") {
-        if (hitsLocalPlayer(projectile.x, projectile.y)) {
-          projectile.hitPlayer = true;
-          applyDamage(projectile.damage);
+      if (projectile.owner !== "self" && player.deadTime === 0 && hitsLocalPlayer(projectile.x, projectile.y)) {
+        applyDamage(projectile.damage, {
+          x: projectile.x,
+          facing: projectile.facing,
+          style: projectile.style,
+          color: projectile.color,
+          knockback: projectile.knockback,
+          hitSound: projectile.hitSound,
+        });
+        remove = true;
+      }
+      if (!remove) {
+        // Impact visuel sur les autres joueurs (leurs dégâts arrivent par le réseau).
+        others.forEach((peer) => {
+          if (remove || peer.dead || peer.id === projectile.owner) return;
+          if (hitsPeer(peer, projectile.x, projectile.y)) {
+            remove = true;
+            const center = peerCenter(peer);
+            fx.impact(projectile.x, projectile.y, projectile.style, projectile.color, projectile.facing);
+            if (projectile.owner === "self") {
+              peer.lastHitByUsAt = performance.now();
+              fx.shake(2, 0.1);
+              sfx(projectile.hitSound);
+              sfx("impactSpark", { volume: 0.5 });
+            } else {
+              sfxAt(projectile.hitSound, center.x, { volume: 0.7 });
+            }
+          }
+        });
+      }
+      if (!remove && (projectile.life <= 0 || projectile.x < -80 || projectile.x > WORLD_WIDTH + 80)) {
+        remove = true;
+        if (projectile.life <= 0) {
+          fx.burst(projectile.x, projectile.y, { count: 5, colors: ["#ffffff", projectile.color], minSize: 1.5, maxSize: 3, maxSpeed: 90, gravity: 200 });
+          sfxAt("fizzle", projectile.x, { volume: 0.5 });
         }
       }
-      if (projectile.life <= 0 || projectile.x < -80 || projectile.x > WORLD_WIDTH + 80) {
-        projectiles.splice(i, 1);
-      }
+      if (remove) projectiles.splice(i, 1);
     }
   }
 
   function getSpriteFrame() {
     const character = characterFor(identity.character);
+    if (player.deadTime > 0) return DEAD_FRAME;
+    if (player.hurtTime > 0) return HURT_FRAME;
     if (player.attackTime > 0) {
       const elapsed = character.attackDuration - player.attackTime;
       const frame = Math.min(3, Math.floor(elapsed / (character.attackDuration / 4)));
@@ -807,6 +1357,8 @@
   /** Même logique d'animation que le joueur local, à partir de son état. */
   function getRemoteFrame(peer) {
     const character = characterFor(peer.character);
+    if (peer.dead) return DEAD_FRAME;
+    if (peer.hurtTime > 0) return HURT_FRAME;
     if (peer.a > 0) {
       const elapsed = character.attackDuration - Math.min(peer.a, character.attackDuration);
       return { column: 3, row: Math.min(3, Math.floor(elapsed / (character.attackDuration / 4))) };
@@ -817,33 +1369,20 @@
   }
 
   function startAttack() {
-    if (!playing || player.attackTime > 0) return;
+    if (!playing || player.attackTime > 0 || player.deadTime > 0) return;
+    if (player.hurtTime > HURT_DURATION * 0.55) return;
     const character = characterFor(identity.character);
     player.attackTime = character.attackDuration;
     player.attackSerial += 1;
-    if (character.attackStyle !== "slash") {
-      spawnProjectile(
-        character,
-        player.x + player.width / 2 + player.facing * 18,
-        player.y + player.height * 0.46,
-        player.facing,
-        character.accent,
-        "self",
-      );
+    if (character.windupSound) sfx(character.windupSound, { volume: 0.8 });
+    if (character.attackStyle === "slash") {
+      const step = comboStep(player.attackSerial);
+      sfx(step === 2 ? "slashHeavy" : "slash");
+      sfx("slashRing", { volume: 0.55, pitch: 1 + step * 0.08 });
+      if (step === 2) fx.shake(1.5, 0.1);
+      return;
     }
-  }
-
-  function spawnPeerAttack(peer) {
-    const character = characterFor(peer.character);
-    if (character.attackStyle === "slash") return;
-    spawnProjectile(
-      character,
-      peer.rx + player.width / 2 + peer.f * 18,
-      peer.ry + player.height * 0.46,
-      peer.f,
-      character.accent,
-      peer.id,
-    );
+    player.shotTimer = character.projectileDelay || 0;
   }
 
   function spawnProjectile(character, x, y, facing, color, owner) {
@@ -859,7 +1398,9 @@
       color,
       owner,
       damage: character.attackDamage,
-      hitPlayer: false,
+      knockback: character.knockback,
+      hitSound: character.hitSound,
+      trailTimer: 0,
     });
     if (projectiles.length > 64) projectiles.splice(0, projectiles.length - 64);
   }
@@ -873,111 +1414,172 @@
     const flicker = player.invulnerable > 0 && Math.floor(player.invulnerable * 14) % 2 === 0;
     ctx.save();
     if (flicker) ctx.globalAlpha = 0.35;
-    drawNinja(identity.character, column, row, player.facing, centerX, drawY, character.accent, 0.34);
+    drawSprite(identity.character, column, row, player.facing, centerX, drawY, player.flashTime / FLASH_DURATION);
     ctx.restore();
-    drawCharacterAttack(character, player.attackTime, player.facing, centerX, player.y + player.height * 0.47, character.accent);
+    if (player.deadTime === 0) {
+      drawCharacterAttack(character, player.attackTime, player.facing, centerX, player.y + player.height * 0.47, character.accent, player.attackSerial);
+    }
   }
 
-  // Chaque héros garde son sprite CC0 d'origine ; son accent teinte
-  // légèrement sa silhouette pour le distinguer en multijoueur.
-  const tintCanvas = document.createElement("canvas");
-  tintCanvas.width = frameSize;
-  tintCanvas.height = frameSize;
-  const tintCtx = tintCanvas.getContext("2d");
-  tintCtx.imageSmoothingEnabled = false;
+  // Silhouette blanche dessinée par-dessus le sprite pendant quelques
+  // centièmes de seconde après un coup : c'est le seul « filtre » appliqué
+  // aux héros, chacun garde ses vraies couleurs.
+  const flashCanvas = document.createElement("canvas");
+  flashCanvas.width = frameSize;
+  flashCanvas.height = frameSize;
+  const flashCtx = flashCanvas.getContext("2d");
+  flashCtx.imageSmoothingEnabled = false;
 
-  /** Feuilles d'un héros réellement prêtes : corps + éventuelle surcouche d'arme. */
-  function loadedLayers(characterId) {
-    const sheets = characterSheets[cleanCharacter(characterId)];
-    if (!sheets) return [];
-    const layers = [];
-    [sheets.body, sheets.weapon].forEach((sheet) => {
-      if (sheet && sheet.complete && sheet.naturalWidth > 0) layers.push(sheet);
-    });
-    return layers;
+  /** Feuille d'un héros réellement chargée, ou null. */
+  function sheetFor(characterId) {
+    const sheet = characterSheets[cleanCharacter(characterId)];
+    return sheet && sheet.complete && sheet.naturalWidth > 0 ? sheet : null;
   }
 
-  function drawNinja(characterId, column, row, facing, centerX, drawY, color, tintAlpha) {
-    const layers = loadedLayers(characterId);
-    if (!layers.length) return;
+  function drawSprite(characterId, column, row, facing, centerX, drawY, flashAlpha) {
+    const sheet = sheetFor(characterId);
+    if (!sheet) return;
     const sourceX = column * frameSize;
     const sourceY = row * frameSize;
 
     ctx.save();
     ctx.translate(Math.round(centerX), 0);
     ctx.scale(facing, 1);
-    layers.forEach((sheet) => {
-      ctx.drawImage(
-        sheet,
-        sourceX,
-        sourceY,
-        frameSize,
-        frameSize,
-        -spriteDrawSize / 2,
-        Math.round(drawY),
-        spriteDrawSize,
-        spriteDrawSize,
-      );
-    });
+    ctx.drawImage(sheet, sourceX, sourceY, frameSize, frameSize, -spriteDrawSize / 2, Math.round(drawY), spriteDrawSize, spriteDrawSize);
 
-    if (color && tintAlpha > 0) {
-      tintCtx.clearRect(0, 0, frameSize, frameSize);
-      layers.forEach((sheet) => {
-        tintCtx.drawImage(sheet, sourceX, sourceY, frameSize, frameSize, 0, 0, frameSize, frameSize);
-      });
-      tintCtx.globalCompositeOperation = "source-in";
-      tintCtx.fillStyle = color;
-      tintCtx.fillRect(0, 0, frameSize, frameSize);
-      tintCtx.globalCompositeOperation = "source-over";
-
-      ctx.globalAlpha = tintAlpha;
-      ctx.drawImage(
-        tintCanvas,
-        0,
-        0,
-        frameSize,
-        frameSize,
-        -spriteDrawSize / 2,
-        Math.round(drawY),
-        spriteDrawSize,
-        spriteDrawSize,
-      );
+    if (flashAlpha > 0.02) {
+      flashCtx.clearRect(0, 0, frameSize, frameSize);
+      flashCtx.drawImage(sheet, sourceX, sourceY, frameSize, frameSize, 0, 0, frameSize, frameSize);
+      flashCtx.globalCompositeOperation = "source-in";
+      flashCtx.fillStyle = "#ffffff";
+      flashCtx.fillRect(0, 0, frameSize, frameSize);
+      flashCtx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = clamp(flashAlpha, 0, 1) * 0.95;
+      ctx.drawImage(flashCanvas, 0, 0, frameSize, frameSize, -spriteDrawSize / 2, Math.round(drawY), spriteDrawSize, spriteDrawSize);
       ctx.globalAlpha = 1;
     }
     ctx.restore();
   }
 
-  function drawCharacterAttack(character, timeLeft, facing, centerX, centerY, color) {
-    if (character.attackStyle !== "slash" || timeLeft <= 0) return;
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  /**
+   * Effets attachés au geste d'attaque : la coupe de Raiden (trois arcs
+   * différents qui s'enchaînent) et le cercle d'incantation de Yume.
+   */
+  function drawCharacterAttack(character, timeLeft, facing, centerX, centerY, color, serial) {
+    if (timeLeft <= 0) return;
     const progress = clamp(1 - timeLeft / character.attackDuration, 0, 1);
-    const alpha = Math.sin(progress * Math.PI) * 0.9;
+
+    if (character.attackStyle === "orb") {
+      const windup = character.projectileDelay / character.attackDuration;
+      if (progress >= windup) return;
+      const k = progress / windup;
+      ctx.save();
+      ctx.translate(Math.round(centerX + facing * 24), Math.round(centerY - 4));
+      ctx.globalAlpha = 0.25 + 0.75 * k;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 10;
+      const radius = 22 - 12 * k;
+      ctx.rotate(k * 5);
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI * 2 * i) / 6;
+        const px = Math.cos(angle) * radius;
+        const py = Math.sin(angle) * radius;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#ffffff";
+      ctx.globalAlpha = k;
+      ctx.beginPath();
+      ctx.arc(0, 0, 3 + 4 * k, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+
+    if (character.attackStyle !== "slash") return;
+    const step = comboStep(serial);
+    const p = clamp((progress - 0.06) / 0.76, 0, 1);
+    const alpha = Math.sin(p * Math.PI);
     if (alpha <= 0.02) return;
 
+    // Trois coupes : descendante, remontante, puis grand tour final.
+    let start = -1.45;
+    let end = 1.25;
+    let innerRadius = 26;
+    let outerRadius = 56;
+    if (step === 1) {
+      start = 1.3;
+      end = -1.4;
+    } else if (step === 2) {
+      start = -2.35;
+      end = 1.8;
+      innerRadius = 30;
+      outerRadius = 64;
+    }
+    const sweep = end - start;
+    const head = start + sweep * easeOutCubic(p);
+    const tailLength = sweep * (0.42 + 0.2 * (1 - p));
+    const tail = head - tailLength;
+    const growth = 1 + p * 0.22;
+
     ctx.save();
-    ctx.translate(Math.round(centerX + facing * 12), Math.round(centerY));
+    ctx.translate(Math.round(centerX + facing * 10), Math.round(centerY));
     ctx.scale(facing, 1);
     ctx.globalAlpha = alpha;
-    ctx.lineCap = "round";
+
+    // Croissant lumineux : dégradé du blanc (bord) vers la couleur (intérieur).
+    const gradient = ctx.createRadialGradient(0, 0, innerRadius * growth, 0, 0, outerRadius * growth);
+    gradient.addColorStop(0, window.PixWorldEffects.withAlpha(color, 0));
+    gradient.addColorStop(0.55, window.PixWorldEffects.withAlpha(color, 0.45));
+    gradient.addColorStop(0.88, "rgba(255, 250, 235, 0.9)");
+    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+    const a0 = Math.min(tail, head);
+    const a1 = Math.max(tail, head);
+    ctx.beginPath();
+    ctx.arc(0, 0, outerRadius * growth, a0, a1);
+    ctx.arc(0, 0, innerRadius * growth, a1, a0, true);
+    ctx.closePath();
+    ctx.fillStyle = gradient;
     ctx.shadowColor = color;
-    ctx.shadowBlur = 17;
+    ctx.shadowBlur = 18;
+    ctx.fill();
+
+    // Bord de lame net, puis fantômes de la position précédente (flou de mouvement).
+    ctx.shadowBlur = 8;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#fff6dc";
+    ctx.lineWidth = step === 2 ? 5 : 4;
     ctx.beginPath();
-    ctx.arc(0, 0, 31 + progress * 17, -1.13, 1.18);
-    ctx.strokeStyle = "#fff2d4";
-    ctx.lineWidth = 7;
+    ctx.arc(0, 0, (outerRadius - 4) * growth, a0, a1);
     ctx.stroke();
-    ctx.shadowBlur = 7;
-    ctx.beginPath();
-    ctx.arc(0, 0, 37 + progress * 17, -1.12, 1.18);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.stroke();
+    for (let ghost = 1; ghost <= 2; ghost++) {
+      const back = head - Math.sign(sweep) * ghost * 0.22;
+      ctx.globalAlpha = alpha * (0.35 - ghost * 0.12);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = color;
+      ctx.beginPath();
+      ctx.arc(0, 0, (outerRadius - 2) * growth, Math.min(back, head), Math.max(back, head));
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
   function drawProjectiles() {
     projectiles.forEach((projectile) => {
       const screenX = projectile.x - camX;
-      if (screenX < -55 || screenX > width + 55) return;
+      if (screenX < -70 || screenX > width + 70) return;
       const fade = clamp(projectile.life / Math.min(0.35, projectile.initialLife), 0, 1);
       ctx.save();
       ctx.translate(Math.round(screenX), Math.round(projectile.y));
@@ -985,83 +1587,124 @@
       ctx.globalAlpha = fade;
 
       if (projectile.style === "arrow") {
+        // Lignes de vitesse derrière la flèche.
+        ctx.globalAlpha = fade * 0.5;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(-22, -5);
+        ctx.lineTo(-40, -5);
+        ctx.moveTo(-26, 4);
+        ctx.lineTo(-48, 4);
+        ctx.stroke();
+        ctx.globalAlpha = fade;
         ctx.shadowColor = projectile.color;
         ctx.shadowBlur = 8;
         ctx.lineCap = "round";
-        ctx.strokeStyle = "#f5f4e9";
+        ctx.strokeStyle = "#d9b27a";
         ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.moveTo(-14, 0);
+        ctx.moveTo(-16, 0);
         ctx.lineTo(12, 0);
         ctx.stroke();
-        ctx.fillStyle = projectile.color;
+        ctx.fillStyle = "#eef2f7";
         ctx.beginPath();
-        ctx.moveTo(15, 0);
-        ctx.lineTo(7, -4.5);
-        ctx.lineTo(8, 0);
-        ctx.lineTo(7, 4.5);
+        ctx.moveTo(18, 0);
+        ctx.lineTo(9, -4.5);
+        ctx.lineTo(10, 0);
+        ctx.lineTo(9, 4.5);
         ctx.closePath();
         ctx.fill();
         ctx.shadowBlur = 0;
-        ctx.strokeStyle = projectile.color;
-        ctx.lineWidth = 1.5;
+        ctx.fillStyle = projectile.color;
         ctx.beginPath();
-        ctx.moveTo(-11, 0);
-        ctx.lineTo(-16, -4);
-        ctx.moveTo(-11, 0);
-        ctx.lineTo(-16, 4);
-        ctx.stroke();
+        ctx.moveTo(-12, 0);
+        ctx.lineTo(-19, -5);
+        ctx.lineTo(-16, 0);
+        ctx.lineTo(-19, 5);
+        ctx.closePath();
+        ctx.fill();
       } else if (projectile.style === "shuriken") {
-        ctx.rotate(projectile.age * 13);
+        // Fantômes de rotation derrière l'étoile.
+        for (let ghost = 2; ghost >= 1; ghost--) {
+          ctx.save();
+          ctx.translate(-ghost * 9, 0);
+          ctx.rotate(projectile.age * 15 - ghost * 0.6);
+          ctx.globalAlpha = fade * (0.28 - ghost * 0.09);
+          drawShuriken(projectile.color, 10);
+          ctx.restore();
+        }
+        ctx.rotate(projectile.age * 15);
         ctx.shadowColor = projectile.color;
         ctx.shadowBlur = 11;
+        drawShuriken(projectile.color, 11);
+        // Reflet qui tourne avec la lame.
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.lineWidth = 1.2;
         ctx.beginPath();
-        for (let point = 0; point < 8; point++) {
-          const angle = (Math.PI * 2 * point) / 8 - Math.PI / 2;
-          const radius = point % 2 === 0 ? 11 : 3.2;
-          const x = Math.cos(angle) * radius;
-          const y = Math.sin(angle) * radius;
-          if (point === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        ctx.fillStyle = "#e8f2fb";
-        ctx.fill();
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = projectile.color;
+        ctx.moveTo(0, -9);
+        ctx.lineTo(0, -4);
         ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(0, 0, 2.1, 0, Math.PI * 2);
-        ctx.fillStyle = projectile.color;
-        ctx.fill();
       } else if (projectile.style === "orb") {
-        for (let trail = 3; trail >= 1; trail--) {
-          ctx.globalAlpha = fade * (0.08 + (4 - trail) * 0.055);
+        const pulse = 1 + Math.sin(projectile.age * 18) * 0.1;
+        for (let trail = 4; trail >= 1; trail--) {
+          ctx.globalAlpha = fade * (0.06 + (5 - trail) * 0.05);
           ctx.beginPath();
-          ctx.arc(-trail * 8, Math.sin(projectile.age * 9 - trail) * 2, 3 + (4 - trail), 0, Math.PI * 2);
+          ctx.arc(-trail * 9, Math.sin(projectile.age * 9 - trail) * 2.5, (3 + (5 - trail)) * pulse, 0, Math.PI * 2);
           ctx.fillStyle = projectile.color;
           ctx.fill();
         }
         ctx.globalAlpha = fade;
         ctx.shadowColor = projectile.color;
-        ctx.shadowBlur = 20;
-        const orb = ctx.createRadialGradient(-2, -3, 1, 0, 0, 12);
+        ctx.shadowBlur = 22;
+        const orb = ctx.createRadialGradient(-2, -3, 1, 0, 0, 13 * pulse);
         orb.addColorStop(0, "#ffffff");
-        orb.addColorStop(0.25, projectile.color);
-        orb.addColorStop(1, "rgba(110, 86, 255, 0.08)");
+        orb.addColorStop(0.3, projectile.color);
+        orb.addColorStop(1, "rgba(110, 86, 255, 0.05)");
         ctx.fillStyle = orb;
         ctx.beginPath();
-        ctx.arc(0, 0, 11, 0, Math.PI * 2);
+        ctx.arc(0, 0, 12 * pulse, 0, Math.PI * 2);
         ctx.fill();
         ctx.shadowBlur = 0;
+        // Deux petites étoiles en orbite.
+        ctx.fillStyle = "#ffffff";
+        for (let i = 0; i < 2; i++) {
+          const angle = projectile.age * 7 + i * Math.PI;
+          ctx.beginPath();
+          ctx.arc(Math.cos(angle) * 15, Math.sin(angle) * 8, 1.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(0, 0, 5.5, projectile.age * 4, projectile.age * 4 + Math.PI * 1.45);
+        ctx.arc(0, 0, 6, projectile.age * 4, projectile.age * 4 + Math.PI * 1.45);
         ctx.stroke();
       }
       ctx.restore();
     });
+  }
+
+  function drawShuriken(color, radius) {
+    ctx.beginPath();
+    for (let point = 0; point < 8; point++) {
+      const angle = (Math.PI * 2 * point) / 8 - Math.PI / 2;
+      const r = point % 2 === 0 ? radius : radius * 0.3;
+      const x = Math.cos(angle) * r;
+      const y = Math.sin(angle) * r;
+      if (point === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = "#e8f2fb";
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, 2.1, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
   }
 
   function drawCharacterPreview(target, character, time, isFeature, offset) {
@@ -1088,8 +1731,8 @@
     target.ellipse(previewWidth / 2, previewHeight * 0.83, previewWidth * 0.22, previewHeight * 0.035, 0, 0, Math.PI * 2);
     target.fill();
 
-    const layers = loadedLayers(character.id);
-    if (!layers.length) return;
+    const sheet = sheetFor(character.id);
+    if (!sheet) return;
 
     const phase = (time + offset) % 4.8;
     const attacking = isFeature && phase > 4.05;
@@ -1100,22 +1743,11 @@
     const drawSize = Math.min(previewWidth, previewHeight) * (isFeature ? 0.73 : 0.76);
     const drawX = (previewWidth - drawSize) / 2;
     const drawY = (previewHeight - drawSize) / 2 + previewHeight * 0.035;
-    layers.forEach((sheet) => {
-      target.drawImage(
-        sheet,
-        column * frameSize,
-        row * frameSize,
-        frameSize,
-        frameSize,
-        drawX,
-        drawY,
-        drawSize,
-        drawSize,
-      );
-    });
+    target.drawImage(sheet, column * frameSize, row * frameSize, frameSize, frameSize, drawX, drawY, drawSize, drawSize);
   }
 
   function drawMenuPreviews(time) {
+    if (gameMenu.hidden) return;
     characterPreviews.forEach((preview, index) => {
       drawCharacterPreview(preview.context, preview.character, time, false, index * 0.28);
     });
@@ -1234,15 +1866,10 @@
 
       const accent = accentFor(peer.character);
       const { column, row } = getRemoteFrame(peer);
-      drawNinja(peer.character, column, row, peer.f, centerX, drawY, accent, 0.34);
-      drawCharacterAttack(
-        characterFor(peer.character),
-        peer.a,
-        peer.f,
-        centerX,
-        peer.ry + player.height * 0.47,
-        accent,
-      );
+      drawSprite(peer.character, column, row, peer.f, centerX, drawY, peer.flashTime / FLASH_DURATION);
+      if (!peer.dead) {
+        drawCharacterAttack(characterFor(peer.character), peer.a, peer.f, centerX, peer.ry + player.height * 0.47, accent, peer.attackSerial);
+      }
       drawNameplate(peer.name, accent, peer.hp, centerX, drawY + 6, false);
     });
   }
@@ -1255,7 +1882,7 @@
     if (!(drawW > 0)) return;
     let off = (camX * factor) % drawW;
     if (off < 0) off += drawW;
-    for (let x = -off; x < width; x += drawW) {
+    for (let x = -off - drawW; x < width + drawW; x += drawW) {
       ctx.drawImage(img, x, bottomY - drawH, drawW, drawH);
     }
   }
@@ -1263,10 +1890,10 @@
   function drawBackground() {
     // Ciel de secours tant que les images ne sont pas chargées.
     ctx.fillStyle = "#58a6e8";
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(-40, -40, width + 80, height + 80);
 
     if (skyLayer.complete && skyLayer.naturalWidth > 0) {
-      drawTiledLayer(skyLayer, skyFactor, height, height);
+      drawTiledLayer(skyLayer, skyFactor, height + 40, height + 20);
     }
     if (hillsLayer.complete && hillsLayer.naturalWidth > 0) {
       drawTiledLayer(hillsLayer, hillsFactor, height * 0.85, height);
@@ -1277,60 +1904,30 @@
     if (!(tileset.complete && tileset.naturalWidth > 0)) {
       // Sol gris de secours avant chargement de la feuille de tuiles.
       ctx.fillStyle = "#858c94";
-      ctx.fillRect(0, groundY, width, height - groundY);
+      ctx.fillRect(-40, groundY, width + 80, height - groundY + 40);
       return;
     }
 
-    const firstTile = Math.floor(camX / tileDraw);
-    const startX = -(camX % tileDraw);
-    const rows = Math.ceil((height - groundY) / tileDraw);
+    const firstTile = Math.floor(camX / tileDraw) - 1;
+    const startX = -(camX % tileDraw) - tileDraw;
+    const rows = Math.ceil((height - groundY) / tileDraw) + 1;
     const tuftW = tileSize * 3;
     const tuftH = 13 * 3;
 
-    for (let c = 0; startX + c * tileDraw < width; c++) {
+    for (let c = 0; startX + c * tileDraw < width + tileDraw; c++) {
       const worldTile = firstTile + c;
       const x = startX + c * tileDraw;
 
-      ctx.drawImage(
-        tileset,
-        grassTopTile[0],
-        grassTopTile[1],
-        tileSize,
-        tileSize,
-        x,
-        groundY,
-        tileDraw,
-        tileDraw,
-      );
+      ctx.drawImage(tileset, grassTopTile[0], grassTopTile[1], tileSize, tileSize, x, groundY, tileDraw, tileDraw);
       for (let r = 1; r <= rows; r++) {
         const dirt = dirtTiles[Math.floor(hash(worldTile * 7 + r * 131) * dirtTiles.length)];
-        ctx.drawImage(
-          tileset,
-          dirt[0],
-          dirt[1],
-          tileSize,
-          tileSize,
-          x,
-          groundY + r * tileDraw,
-          tileDraw,
-          tileDraw,
-        );
+        ctx.drawImage(tileset, dirt[0], dirt[1], tileSize, tileSize, x, groundY + r * tileDraw, tileDraw, tileDraw);
       }
 
       // Touffes d'herbe décoratives, posées de façon déterministe.
       if (hash(worldTile + 999) < 0.2) {
         const tuft = tuftTiles[Math.floor(hash(worldTile + 777) * tuftTiles.length)];
-        ctx.drawImage(
-          tileset,
-          tuft[0],
-          tuft[1],
-          tileSize,
-          13,
-          x + (tileDraw - tuftW) / 2,
-          groundY - tuftH + 4,
-          tuftW,
-          tuftH,
-        );
+        ctx.drawImage(tileset, tuft[0], tuft[1], tileSize, 13, x + (tileDraw - tuftW) / 2, groundY - tuftH + 4, tuftW, tuftH);
       }
     }
   }
@@ -1342,30 +1939,24 @@
     const tuftW = tileSize * 3;
     const tuftH = 13 * 3;
     const scroll = camX * foregroundFactor;
-    const firstTile = Math.floor(scroll / tuftW);
-    const startX = -(scroll % tuftW);
+    const firstTile = Math.floor(scroll / tuftW) - 1;
+    const startX = -(scroll % tuftW) - tuftW;
 
-    for (let c = 0; startX + c * tuftW < width; c++) {
+    for (let c = 0; startX + c * tuftW < width + tuftW; c++) {
       const worldTile = firstTile + c;
       if (hash(worldTile + 555) < 0.45) {
         const tuft = tuftTiles[Math.floor(hash(worldTile + 313) * tuftTiles.length)];
-        ctx.drawImage(
-          tileset,
-          tuft[0],
-          tuft[1],
-          tileSize,
-          13,
-          startX + c * tuftW,
-          height - tuftH + 8,
-          tuftW,
-          tuftH,
-        );
+        ctx.drawImage(tileset, tuft[0], tuft[1], tileSize, 13, startX + c * tuftW, height - tuftH + 8, tuftW, tuftH);
       }
     }
   }
 
   function draw() {
     ctx.clearRect(0, 0, width, height);
+
+    // Secousse de caméra : tout le monde (décor, héros, effets) bouge ensemble.
+    ctx.save();
+    ctx.translate(Math.round(fx.shakeX), Math.round(fx.shakeY));
 
     drawBackground();
     drawGround();
@@ -1397,8 +1988,12 @@
       true,
     );
     drawProjectiles();
+    fx.draw(ctx, camX);
 
     drawForeground();
+    ctx.restore();
+
+    fx.drawOverlay(ctx, width, height);
   }
 
   function frame(time) {
@@ -1415,6 +2010,10 @@
   }
 
   // ───────────────────────────── Entrées ─────────────────────────────
+  function isTypingTarget(target) {
+    return target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+  }
+
   window.addEventListener("keydown", (event) => {
     const keyLabel = event.key.toLowerCase();
     if (event.key === "Tab" && !gameMenu.hidden) {
@@ -1437,8 +2036,17 @@
     }
     if (event.code === "Escape" || keyLabel === "escape") {
       event.preventDefault();
-      if (playing) openMenu("pause");
-      else if (!gameMenu.hidden && menuMode === "pause") resumeGame();
+      if (playing) {
+        sfx("uiPause");
+        openMenu("pause");
+      } else if (!gameMenu.hidden && menuMode === "pause") {
+        resumeGame();
+      }
+      return;
+    }
+    if ((event.code === "KeyM" || keyLabel === "m") && !event.repeat && !isTypingTarget(event.target)) {
+      event.preventDefault();
+      toggleMute();
       return;
     }
     if (!playing) return;
@@ -1458,9 +2066,12 @@
     keys.add(event.code);
     if (keyLabel.length === 1) keys.add(keyLabel);
 
-    if (event.code === "Space" && !event.repeat && player.grounded) {
+    if (event.code === "Space" && !event.repeat && player.grounded && player.deadTime === 0) {
       player.velocityY = -player.jumpStrength;
       player.grounded = false;
+      player.airTime = 0;
+      sfx("jump");
+      fx.dust(player.x + player.width / 2, groundY, { count: 4 });
     }
 
     if ((event.code === "KeyX" || keyLabel === "x") && !event.repeat) {
@@ -1481,7 +2092,7 @@
     const rect = canvas.getBoundingClientRect();
     const clickX = event.clientX - rect.left;
     const playerScreenX = player.x + player.width / 2 - camX;
-    if (Math.abs(clickX - playerScreenX) > 4) {
+    if (Math.abs(clickX - playerScreenX) > 4 && player.deadTime === 0) {
       player.facing = clickX > playerScreenX ? 1 : -1;
     }
     startAttack();
@@ -1498,6 +2109,7 @@
   selectedCharacter = identity.character;
 
   buildCharacterCards();
+  updateSoundButtons();
   resize();
   connect();
   openMenu("start");
