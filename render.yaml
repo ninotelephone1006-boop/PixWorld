@@ -1,0 +1,16 @@
+# Déployer comme Blueprint Render, puis partager l'URL HTTPS du service.
+# Une seule instance : l'arène est conservée en mémoire dans ce processus.
+services:
+  - type: web
+    name: pixworld
+    runtime: node
+    plan: starter
+    numInstances: 1
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
