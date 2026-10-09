@@ -7,11 +7,16 @@
  * Le serveur ne fait que relayer les positions : chaque client envoie son
  * état 20 fois par seconde et reçoit la position de tous les autres. Aucune
  * donnée n'est conservée après la déconnexion.
+ *
+ * Il écoute sur toutes les interfaces : les autres PC du réseau (Wi-Fi,
+ * Ethernet…) peuvent donc rejoindre la partie. Les adresses à partager sont
+ * affichées au démarrage et servies par GET /info.
  */
 "use strict";
 
 const http = require("http");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 
@@ -46,6 +51,24 @@ const MIME = {
   ".md": "text/markdown; charset=utf-8",
 };
 
+/**
+ * Adresses du réseau local à donner aux autres joueurs : celle-ci sert autant
+ * à l'affichage du démarrage qu'à l'endpoint /info (le menu les montre pour
+ * pouvoir les copier).
+ */
+function localAddresses() {
+  const addresses = [];
+  const interfaces = os.networkInterfaces();
+  Object.keys(interfaces).forEach((name) => {
+    (interfaces[name] || []).forEach((entry) => {
+      if (!entry || entry.internal) return;
+      if (entry.family !== "IPv4" && entry.family !== 4) return;
+      addresses.push("http://" + entry.address + ":" + PORT);
+    });
+  });
+  return addresses;
+}
+
 // ───────────────────────────── Fichiers statiques ─────────────────────────────
 
 const server = http.createServer((req, res) => {
@@ -63,6 +86,25 @@ const server = http.createServer((req, res) => {
       .map((p) => ({ name: p.name, character: p.character }));
     res.writeHead(200, { "content-type": MIME[".json"], "cache-control": "no-store" });
     res.end(JSON.stringify({ online: roster.length, players: roster }));
+    return;
+  }
+
+  // Adresses à partager pour rejoindre la partie depuis un autre PC.
+  // Accessible en cross-origin : un client hébergé ailleurs (page statique,
+  // autre machine…) peut afficher la liste sans être bloqué par le CORS.
+  if (pathname === "/info") {
+    const roster = Array.from(players.values()).filter((p) => p.joined);
+    res.writeHead(200, {
+      "content-type": MIME[".json"],
+      "cache-control": "no-store",
+      "access-control-allow-origin": "*",
+    });
+    res.end(JSON.stringify({
+      port: PORT,
+      online: roster.length,
+      players: roster.map((p) => ({ name: p.name, character: p.character })),
+      addresses: localAddresses(),
+    }));
     return;
   }
 
@@ -400,4 +442,14 @@ function createFrameHandler(player) {
 
 server.listen(PORT, HOST, () => {
   console.log("PixWorld — http://localhost:" + PORT + " (websocket sur /ws)");
+  const addresses = localAddresses();
+  if (HOST === "127.0.0.1" || HOST === "localhost" || HOST === "::1") {
+    console.log("Écoute limitée à cette machine (" + HOST + ") : les autres PC ne peuvent pas rejoindre.");
+    console.log("Relance avec HOST=0.0.0.0 npm start pour ouvrir la partie au réseau.");
+  } else if (addresses.length) {
+    console.log("Pour rejoindre depuis un autre PC :");
+    addresses.forEach((address) => console.log("  " + address));
+  } else {
+    console.log("Aucune adresse réseau trouvée : vérifie la connexion Wi-Fi / Ethernet.");
+  }
 });
