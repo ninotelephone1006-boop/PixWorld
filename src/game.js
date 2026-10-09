@@ -12,6 +12,11 @@
  * Tout est accompagné d'effets sonores synthétisés (src/audio.js) et
  * d'effets visuels (src/effects.js).
  *
+ * Le monde est procédural (src/world.js) : relief, plateformes et quatre
+ * biomes (prairie, dunes, taïga gelée, terres de cendre) se déduisent d'une
+ * graine commune à tous les joueurs. Le rendu des biomes est dans
+ * src/scenery.js.
+ *
  * Le script reste utilisable sans serveur (solo, ou entre onglets d'un même
  * navigateur) : voir src/net.js pour les détails des transports.
  */
@@ -92,8 +97,8 @@
     characterSheets[character.id] = sheet;
   });
 
-  // Décor pixel art « Sunny Land » (Ansimuz, CC0) : ciel, collines et
-  // tuiles de sol, dessinées en parallaxe derrière les héros.
+  // Décor de la prairie « Sunny Land » (Ansimuz, CC0) : ciel, collines et
+  // touffes d'herbe. Les autres biomes sont dessinés par src/scenery.js.
   const skyLayer = new Image();
   skyLayer.src = "assets/background/sky-back.png";
   const hillsLayer = new Image();
@@ -105,18 +110,9 @@
   const tileScale = 4;
   const tileDraw = tileSize * tileScale;
   const groundHeight = tileDraw * 2;
-  // Réglages des couches de parallaxe (facteur de défilement caméra).
-  const skyFactor = 0.1;
-  const hillsFactor = 0.32;
+  // Herbes du premier plan (défilement plus rapide que le sol).
   const foregroundFactor = 1.3;
-  // Tuiles de terre (variants) et touffes d'herbe dans la feuille.
-  const dirtTiles = [
-    [16, 48],
-    [80, 48],
-    [16, 80],
-    [48, 80],
-  ];
-  const grassTopTile = [48, 16];
+  // Tuiles de la feuille : touffes d'herbe de la prairie.
   const tuftTiles = [
     [16, 115],
     [48, 115],
@@ -132,8 +128,17 @@
   const HURT_FRAME = { column: 5, row: 0 };
   const DEAD_FRAME = { column: 5, row: 3 };
 
-  // Le monde est partagé : tout le monde parcourt exactement le même niveau.
-  const WORLD_WIDTH = 2600;
+  // Le monde est partagé : même graine, donc le même relief, les mêmes
+  // plateformes et le même décor pour tous les joueurs.
+  const WORLD_SEED = "pixworld";
+  const world = window.PixWorldWorld.create(WORLD_SEED);
+  const WORLD_WIDTH = world.width;
+  const scenery = window.PixWorldScenery.create({
+    world,
+    images: { sky: skyLayer, hills: hillsLayer },
+  });
+  const STEP_HEIGHT = window.PixWorldWorld.constants.STEP;
+  const BIOME_MATERIAL = { prairie: "grass", desert: "dirt", snow: "snow", volcano: "stone" };
   const SEND_INTERVAL = 0.05; // 20 envois de position par seconde
   const SPAWN_X = 112;
 
@@ -171,7 +176,8 @@
 
   let width = 0;
   let height = 0;
-  let groundY = 0;
+  let groundY = 0; // ligne de base de l'écran ; le sol réel est groundAt(x)
+  let currentBiome = null; // biome où se trouve le joueur (pour l'annonce)
   let lastTime = 0;
   let camX = 0;
   let sendTimer = 0;
@@ -212,6 +218,16 @@
 
   function clamp(value, min, max) {
     return value < min ? min : value > max ? max : value;
+  }
+
+  /** Hauteur du sol (écran) sous l'abscisse monde x : le relief varie avec le monde. */
+  function groundAt(x) {
+    return groundY - world.offsetAt(x);
+  }
+
+  /** Centre horizontal d'un personnage dont le bord gauche est en x. */
+  function centerOf(x) {
+    return x + player.width / 2;
   }
 
   /** Nettoie un pseudo venu du réseau ou du champ de saisie. */
@@ -689,11 +705,12 @@
     myId = null;
     hasJoined = false;
     player.x = SPAWN_X;
-    player.y = groundY - player.height;
+    player.y = groundAt(centerOf(player.x)) - player.height;
     player.velocityX = 0;
     player.velocityY = 0;
     player.knockback = 0;
     player.grounded = true;
+    currentBiome = null;
     player.attackTime = 0;
     player.attackSerial = 0;
     player.shotTimer = -1;
@@ -856,7 +873,7 @@
       shotTimer: -1,
       shotStyle: null,
       rx: player.x,
-      ry: groundY - player.height,
+      ry: groundAt(centerOf(player.x)) - player.height,
       animTime: 0,
       hurtTime: 0,
       flashTime: 0,
@@ -876,7 +893,7 @@
       if (!peer) return;
       // Première position connue : on place le joueur directement dessus.
       peer.rx = clamp(Number(state.x) || 0, 0, WORLD_WIDTH - player.width);
-      peer.ry = groundY - player.height - (Number(state.gap) || 0);
+      peer.ry = groundAt(centerOf(peer.rx)) - player.height - (Number(state.gap) || 0);
     }
     const wasGrounded = peer.g;
     peer.x = clamp(Number(state.x) || 0, 0, WORLD_WIDTH - player.width);
@@ -901,7 +918,7 @@
       if (wasGrounded && !peer.g && peer.vy < -100) sfxAt("jump", center.x, { volume: 0.5 });
       if (!wasGrounded && peer.g) {
         sfxAt("land", center.x, { volume: 0.6 });
-        fx.dust(center.x, groundY, { count: 5 });
+        fx.dust(center.x, groundAt(center.x), { count: 5 });
       }
     }
 
@@ -969,7 +986,7 @@
   function onPeerRespawned(peer) {
     // Le joueur réapparaît au camp : on saute directement à sa position.
     peer.rx = peer.x;
-    peer.ry = groundY - player.height - peer.gap;
+    peer.ry = groundAt(centerOf(peer.rx)) - player.height - peer.gap;
     const center = peerCenter(peer);
     fx.respawn(center.x, peer.ry + player.height, accentFor(peer.character));
     sfxAt("respawn", center.x, { volume: 0.6 });
@@ -1014,13 +1031,14 @@
         x: player.x,
         width: player.width,
         vx: player.velocityX,
-        gap: groundY - (player.y + player.height),
+        gap: groundAt(centerOf(player.x)) - (player.y + player.height),
       });
     }
     others.forEach((peer) => {
       if (!peer.dead) walkers.push({ id: peer.id, x: peer.rx, width: player.width, vx: peer.vx, gap: peer.gap });
     });
-    return walkers;
+    // L'herbe ne se trouve que dans la prairie : ailleurs, personne ne la plie.
+    return walkers.filter((walker) => world.biomeAt(centerOf(walker.x)).id === "prairie");
   }
 
   /**
@@ -1036,7 +1054,7 @@
 
   /** Quelques brins projetés dans le sens de la marche, parfois seulement. */
   function handleGrassBlades(event) {
-    fx.blades(event.x, groundY - 24, { count: 2 + Math.floor(Math.random() * 3), direction: event.dir });
+    fx.blades(event.x, groundAt(event.x) - 24, { count: 2 + Math.floor(Math.random() * 3), direction: event.dir });
   }
 
   // ─────────────────────────── Boucle de jeu ───────────────────────────
@@ -1051,7 +1069,7 @@
     ctx.imageSmoothingEnabled = false;
     groundY = Math.max(0, height - groundHeight);
     player.x = clamp(player.x, 0, WORLD_WIDTH - player.width);
-    if (player.grounded) player.y = groundY - player.height;
+    if (player.grounded) player.y = groundAt(centerOf(player.x)) - player.height;
     draw();
   }
 
@@ -1142,7 +1160,7 @@
     player.hp = MAX_HP;
     player.deadTime = 0;
     player.x = SPAWN_X;
-    player.y = groundY - player.height;
+    player.y = groundAt(centerOf(player.x)) - player.height;
     player.velocityX = 0;
     player.velocityY = 0;
     player.knockback = 0;
@@ -1278,6 +1296,7 @@
 
     updateOthers(delta);
     grass.update(delta, grassWalkers());
+    scenery.updateAmbient(delta, width, height, world.biomeAt(camX + width / 2).id);
     updateProjectiles(delta);
     checkMeleeHits();
     fx.update(delta);
@@ -1313,7 +1332,7 @@
       sendTimer = 0;
       net.sendState({
         x: Math.round(player.x),
-        gap: Math.round(groundY - (player.y + player.height)),
+        gap: Math.round(groundAt(centerOf(player.x)) - (player.y + player.height)),
         f: player.facing,
         vx: Math.round(player.velocityX),
         vy: Math.round(player.velocityY),
@@ -1369,13 +1388,15 @@
     player.velocityX = player.knockback;
     player.x = clamp(player.x + player.velocityX * delta, 0, WORLD_WIDTH - player.width);
     if (!player.grounded) {
+      const feetBefore = player.y + player.height;
       player.velocityY += 1900 * delta;
       player.y += player.velocityY * delta;
-      if (player.y + player.height >= groundY) {
-        player.y = groundY - player.height;
+      const top = world.landingTop(centerOf(player.x), feetBefore, player.y + player.height, groundY);
+      if (top !== null && player.velocityY >= 0) {
+        player.y = top - player.height;
         player.velocityY = 0;
         player.grounded = true;
-        fx.dust(player.x + player.width / 2, groundY, { count: 8 });
+        fx.dust(centerOf(player.x), top, { count: 8 });
         sfx("land", { volume: 0.6, pitch: 0.85 });
       }
     }
@@ -1397,39 +1418,70 @@
     const target = clamp(player.x + player.width / 2 - width / 2, 0, Math.max(0, WORLD_WIDTH - width));
     camX += (target - camX) * Math.min(1, delta * 10);
 
+    const cx = centerOf(player.x);
+    const feetBefore = player.y + player.height;
     if (!player.grounded) {
       player.airTime += delta;
       player.velocityY += 1900 * delta;
       player.y += player.velocityY * delta;
 
-      if (player.y + player.height >= groundY) {
-        player.y = groundY - player.height;
+      // Atterrissage sur le relief ou sur une plateforme traversée par le haut.
+      const top = world.landingTop(cx, feetBefore, player.y + player.height, groundY);
+      if (top !== null && player.velocityY >= 0) {
+        player.y = top - player.height;
         const impact = player.velocityY;
         player.velocityY = 0;
         player.grounded = true;
         player.landingTime = 0.12;
         const me = playerCenter();
         const heavy = impact > 900;
-        fx.dust(me.x, groundY, { count: heavy ? 10 : 6 });
+        fx.dust(me.x, top, { count: heavy ? 10 : 6 });
         sfx("land", { volume: heavy ? 1 : 0.7, pitch: heavy ? 0.9 : 1 });
         if (heavy) fx.shake(2, 0.1);
         player.airTime = 0;
       }
-    } else if (Math.abs(walk) > 0.5) {
+    } else {
+      // Au sol : on suit le relief (montées et descentes douces) ; si la
+      // surface se dérobe, le personnage tombe.
+      const top = world.supportTop(cx, feetBefore, groundY);
+      if (top === null) {
+        player.grounded = false;
+        player.velocityY = 0;
+        player.airTime = 0;
+      } else {
+        player.y = top - player.height;
+      }
+    }
+
+    if (player.grounded && Math.abs(walk) > 0.5) {
       // Bruits de pas réguliers et petits nuages de poussière.
       player.stepTimer -= delta;
       if (player.stepTimer <= 0) {
         player.stepTimer = 0.24;
         player.stepCount++;
         // Les pas sont générés en code : une variante différente à chaque fois.
-        sfx("step", { volume: 0.8 });
+        sfx("step", { volume: 0.8, material: stepMaterialAt(cx) });
         if (player.stepCount % 2 === 0) {
-          fx.dust(player.x + player.width / 2 - player.facing * 10, groundY, { count: 2, direction: player.facing });
+          fx.dust(cx - player.facing * 10, groundAt(cx), { count: 2, direction: player.facing });
         }
       }
-    } else {
+    } else if (player.grounded) {
       player.stepTimer = 0.05;
     }
+
+    // Annonce quand on entre dans un nouveau biome.
+    const biome = world.biomeAt(cx);
+    if (currentBiome === null) {
+      currentBiome = biome.id;
+    } else if (currentBiome !== biome.id) {
+      currentBiome = biome.id;
+      toast(biome.name + " · " + biome.blurb, false);
+    }
+  }
+
+  /** Matière des pas selon le biome sous le personnage. */
+  function stepMaterialAt(x) {
+    return BIOME_MATERIAL[world.biomeAt(x).id] || "grass";
   }
 
   /** Interpole les joueurs distants pour lisser les 20 messages/seconde. */
@@ -1440,7 +1492,7 @@
       peer.hurtTime = Math.max(0, peer.hurtTime - delta);
       peer.flashTime = Math.max(0, peer.flashTime - delta);
       peer.rx += (peer.x - peer.rx) * Math.min(1, delta * 14);
-      const targetY = groundY - player.height - peer.gap;
+      const targetY = groundAt(centerOf(peer.x)) - player.height - peer.gap;
       peer.ry += (targetY - peer.ry) * Math.min(1, delta * 14);
 
       const character = characterFor(peer.character);
@@ -1470,7 +1522,7 @@
         peer.stepTimer -= delta;
         if (peer.stepTimer <= 0) {
           peer.stepTimer = 0.24;
-          sfxAt("step", center.x, { volume: 0.5 });
+          sfxAt("step", center.x, { volume: 0.5, material: stepMaterialAt(center.x) });
         }
       }
     });
@@ -2079,7 +2131,7 @@
       // Ombre au sol, comme pour le joueur local.
       ctx.fillStyle = "rgba(23, 59, 91, 0.16)";
       ctx.beginPath();
-      ctx.ellipse(centerX, groundY + 7, player.width * (peer.g ? 0.58 : 0.42), 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(centerX, groundAt(peer.rx + player.width / 2) + 7, player.width * (peer.g ? 0.58 : 0.42), 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
       if (centerX < -spriteDrawSize || centerX > width + spriteDrawSize) {
@@ -2097,32 +2149,6 @@
     });
   }
 
-  // Répète horizontalement une image de décor, décalée par la caméra
-  // multipliée par le facteur de parallaxe de la couche.
-  function drawTiledLayer(img, factor, drawH, bottomY) {
-    const scale = drawH / img.height;
-    const drawW = img.width * scale;
-    if (!(drawW > 0)) return;
-    let off = (camX * factor) % drawW;
-    if (off < 0) off += drawW;
-    for (let x = -off - drawW; x < width + drawW; x += drawW) {
-      ctx.drawImage(img, x, bottomY - drawH, drawW, drawH);
-    }
-  }
-
-  function drawBackground() {
-    // Ciel de secours tant que les images ne sont pas chargées.
-    ctx.fillStyle = "#58a6e8";
-    ctx.fillRect(-40, -40, width + 80, height + 80);
-
-    if (skyLayer.complete && skyLayer.naturalWidth > 0) {
-      drawTiledLayer(skyLayer, skyFactor, height + 40, height + 20);
-    }
-    if (hillsLayer.complete && hillsLayer.naturalWidth > 0) {
-      drawTiledLayer(hillsLayer, hillsFactor, height * 0.85, height);
-    }
-  }
-
   /**
    * Touffe posée sur le sol (tileX : bord gauche de sa tuile à l'écran).
    * Au repos, elle est dessinée d'un seul tenant. Quand un personnage vient
@@ -2133,7 +2159,7 @@
   function drawGroundTuft(tuft, tileX) {
     const [sourceX, sourceY] = tuftTiles[tuft.variant];
     const drawX = tileX + (tileDraw - tuftW) / 2;
-    const drawY = groundY - tuftH + 4;
+    const drawY = groundAt(tuft.tile * tileDraw + tileDraw / 2) - tuftH + 4;
     const pose = grass.poseFor(tuft.tile);
     if (!pose) {
       ctx.drawImage(tileset, sourceX, sourceY, tileSize, 13, drawX, drawY, tuftW, tuftH);
@@ -2159,38 +2185,26 @@
     }
   }
 
-  function drawGround() {
-    if (!(tileset.complete && tileset.naturalWidth > 0)) {
-      // Sol gris de secours avant chargement de la feuille de tuiles.
-      ctx.fillStyle = "#858c94";
-      ctx.fillRect(-40, groundY, width + 80, height - groundY + 40);
-      return;
-    }
-
+  /** Touffes d'herbe décoratives de la prairie, posées sur le relief. */
+  function drawTufts() {
+    if (!(tileset.complete && tileset.naturalWidth > 0)) return;
     const firstTile = Math.floor(camX / tileDraw) - 1;
     const startX = -(camX % tileDraw) - tileDraw;
-    const rows = Math.ceil((height - groundY) / tileDraw) + 1;
-
     for (let c = 0; startX + c * tileDraw < width + tileDraw; c++) {
       const worldTile = firstTile + c;
       const x = startX + c * tileDraw;
-
-      ctx.drawImage(tileset, grassTopTile[0], grassTopTile[1], tileSize, tileSize, x, groundY, tileDraw, tileDraw);
-      for (let r = 1; r <= rows; r++) {
-        const dirt = dirtTiles[Math.floor(hash(worldTile * 7 + r * 131) * dirtTiles.length)];
-        ctx.drawImage(tileset, dirt[0], dirt[1], tileSize, tileSize, x, groundY + r * tileDraw, tileDraw, tileDraw);
-      }
-
-      // Touffes d'herbe décoratives, posées de façon déterministe (src/grass.js).
+      if (world.biomeAt(worldTile * tileDraw + tileDraw / 2).id !== "prairie") continue;
       const tuft = window.PixWorldGrass.tuftFor(worldTile);
       if (tuft) drawGroundTuft(tuft, x);
     }
   }
 
-  // Herbes au premier plan, défilant plus vite que le sol : renforce
-  // l'effet de profondeur de la parallaxe.
+  // Herbes au premier plan de la prairie, défilant plus vite que le sol :
+  // renforce l'effet de profondeur de la parallaxe.
   function drawForeground() {
     if (!(tileset.complete && tileset.naturalWidth > 0)) return;
+    const blend = world.blendAt(camX + width / 2);
+    if (blend.from !== "prairie" || blend.to !== "prairie") return;
     const scroll = camX * foregroundFactor;
     const firstTile = Math.floor(scroll / tuftW) - 1;
     const startX = -(scroll % tuftW) - tuftW;
@@ -2211,17 +2225,25 @@
     ctx.save();
     ctx.translate(Math.round(fx.shakeX), Math.round(fx.shakeY));
 
-    drawBackground();
-    drawGround();
+    // Décor des biomes : ciel, lointains, relief, puis props et plateformes.
+    const view = { width, height, camX, baseY: groundY, time: lastTime / 1000 };
+    scenery.ensurePatterns(ctx);
+    scenery.drawSky(ctx, width, height, camX, view.time);
+    scenery.drawFarLayers(ctx, width, height, camX);
+    scenery.drawTerrain(ctx, view);
+    drawTufts();
+    scenery.drawProps(ctx, view);
+    scenery.drawPlatforms(ctx, view);
 
     drawOthers();
 
     // Ombre discrète pour ancrer le sprite au sol pendant le saut.
+    const meX = player.x + player.width / 2;
     ctx.fillStyle = "rgba(23, 59, 91, 0.18)";
     ctx.beginPath();
     ctx.ellipse(
-      player.x + player.width / 2 - camX,
-      groundY + 7,
+      meX - camX,
+      groundAt(meX) + 7,
       player.width * (player.grounded ? 0.58 : 0.42),
       5,
       0,
@@ -2244,8 +2266,10 @@
     fx.draw(ctx, camX);
 
     drawForeground();
+    scenery.drawAmbient(ctx);
     ctx.restore();
 
+    scenery.drawGrade(ctx, width, height, camX);
     fx.drawOverlay(ctx, width, height);
   }
 
@@ -2324,7 +2348,7 @@
       player.grounded = false;
       player.airTime = 0;
       sfx("jump");
-      fx.dust(player.x + player.width / 2, groundY, { count: 4 });
+      fx.dust(player.x + player.width / 2, groundAt(player.x + player.width / 2), { count: 4 });
     }
 
     if ((event.code === "KeyX" || keyLabel === "x") && !event.repeat) {
