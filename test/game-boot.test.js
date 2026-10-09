@@ -492,6 +492,7 @@ function createBrowser(options) {
     load() {
       for (const src of SCRIPTS) {
         try {
+          if (settings.beforeScript) settings.beforeScript(src, sandbox);
           vm.runInContext(fs.readFileSync(path.join(ROOT, src), "utf8"), sandbox, { filename: src });
         } catch (error) {
           return src + " : " + (error && error.stack ? error.stack : error);
@@ -609,11 +610,15 @@ function testOfflineBoot() {
   browser.dispose();
 }
 
-testMarkupStaysInSync();
-testPageBoots();
-testOfflineBoot();
+module.exports = { createBrowser, StubEvent };
 
-if (failures) {
-  console.log("\n" + failures + " vérification(s) en échec.");
-  process.exitCode = 1;
+if (require.main === module) {
+  testMarkupStaysInSync();
+  testPageBoots();
+  testOfflineBoot();
+
+  if (failures) {
+    console.log("\n" + failures + " vérification(s) en échec.");
+    process.exitCode = 1;
+  }
 }

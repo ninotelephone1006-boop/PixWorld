@@ -11,29 +11,13 @@
  *  3. la roche mère ne casse pas ;
  *  4. marcher vers la paroi d'un trou creusé bloque (collisions réelles) ;
  *  5. clic droit : un bloc est posé contre la paroi (jamais en l'air), puis
- *     cassé sans rien faire tomber d'autre.
+ *     cassé sans rien faire tomber d'autre ;
+ *  6. en ligne, une case rebouchée entre deux images peut être minée de
+ *     nouveau sans relâcher le bouton de la souris.
  */
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
-
-const ROOT = path.join(__dirname, "..");
-
-// Réutilise le harnais DOM/WebSocket de game-boot.test.js (tout ce qui précède
-// la section « Les tests »), en corrigeant la racine du projet.
-const harnessSource = fs.readFileSync(path.join(__dirname, "game-boot.test.js"), "utf8");
-const marker = "Les tests";
-const cutAt = harnessSource.indexOf(marker);
-assert(cutAt > 0, "le harnais de game-boot.test.js est introuvable");
-const harnessPath = path.join(os.tmpdir(), "pixworld-harness-" + process.pid + ".js");
-fs.writeFileSync(
-  harnessPath,
-  harnessSource.slice(0, cutAt).replace('path.join(__dirname, "..")', JSON.stringify(ROOT)) +
-    "\nmodule.exports = { createBrowser, StubEvent };\n",
-);
-const { createBrowser } = require(harnessPath);
+const { createBrowser } = require("./game-boot.test.js");
 
 const browser = createBrowser({ noServer: true });
 const failure = browser.load();
@@ -113,4 +97,55 @@ assert.equal(dbg.placed().length, 0, "Le bloc posé se casse");
 assert.equal(dbg.player.grounded, true, "Le joueur n'a pas bougé pendant ce temps");
 
 browser.dispose();
-console.log("gameplay.test.js : caméra 2 couches, minage jusqu'au fond, roche mère, parois, pose au clic droit : ok");
+
+// 6. Un autre joueur rebouche la case pendant qu'on maintient le clic :
+// les deux confirmations peuvent arriver avant la prochaine image.
+const online = createBrowser();
+try {
+  assert.equal(online.load(), null);
+  const socket = online.sockets[0];
+  socket.open();
+  const form = online.document.querySelector("#menu-form");
+  online.document.querySelector("#menu-name-input").value = "Mineur";
+  form.dispatchEvent({ type: "submit", target: form, preventDefault() {} });
+  online.runFrames(1);
+  const onlineDbg = online.sandbox.PixWorldDebug;
+  const onlineCanvas = online.document.querySelector("#world");
+  online.sandbox.dispatchEvent({
+    type: "pointerdown", target: onlineCanvas, button: 0, pointerId: 2,
+    clientX: 216, clientY: onlineDbg.groundY + 24, preventDefault() {},
+  });
+  const requests = () => socket.sent.filter((m) => m.t === "mineBlock");
+  const confirm = (request) => socket.receive({
+    t: "mineBlock", column: 4, row: 0,
+    dropId: "p1:" + request.serial, ownerId: "p1", serial: request.serial,
+  });
+  online.runFrames(14);
+  assert.equal(requests().length, 1);
+  let request = requests().at(-1);
+  let previousType = "grass";
+  for (const [index, type] of ["stone", "dirt", "grass"].entries()) {
+    confirm(request);
+    assert.equal(onlineDbg.drops().find((drop) => drop.id === "p1:" + request.serial).type, previousType);
+    socket.receive({ t: "placeBlock", column: 4, row: 0, type, ownerId: "builder", serial: index + 1 });
+    assert.equal(onlineDbg.placed().length, 1);
+    const count = requests().length;
+    online.runFrames(1);
+    assert.equal(requests().length, count, "La nouvelle pose exige un maintien complet, pas une casse immédiate");
+    online.runFrames(13);
+    assert.equal(requests().length, count + 1, "La case reposée ne reste pas bloquée sur l'ancienne demande de minage");
+    request = requests().at(-1);
+    assert.equal(request.column, 4);
+    assert.equal(request.row, 0);
+    previousType = type;
+  }
+  confirm(request);
+  assert.equal(onlineDbg.drops().find((drop) => drop.id === "p1:" + request.serial).type, previousType);
+  assert.equal(onlineDbg.placed().length, 0);
+  const lastCount = requests().length;
+  online.runFrames(14);
+  assert.equal(requests().length, lastCount, "Le bloc naturel cassé ne réapparaît pas sous les blocs posés");
+} finally {
+  online.dispose();
+}
+console.log("gameplay.test.js : caméra, minage, roche mère, parois, pose et minage répété sans relâcher : ok");

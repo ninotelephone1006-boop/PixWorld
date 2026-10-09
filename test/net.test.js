@@ -149,7 +149,21 @@ async function testOnlineGame() {
   check("le joueur distant garde son personnage", events[0].players[0].name === "Bob" && events[0].players[0].character === "mage");
   check("les points de vie distants sont relayés", events[1].p[0].hp === 55, JSON.stringify(events[1]));
 
+  net.dropInventory(7012, -30, { grass: 4, dirt: 9, stone: 512 }, 8);
+  const deathRequest = socket.sent[socket.sent.length - 1];
+  check("le butin de mort est transmis avec sa position et toutes ses quantités",
+    deathRequest && deathRequest.t === "deathDrop" && deathRequest.x === 7012 && deathRequest.depth === -30 &&
+    deathRequest.inventory.stone === 512 && deathRequest.serial === 8, JSON.stringify(deathRequest));
+  socket.onmessage({ data: JSON.stringify({ t: "deathDrop", ownerId: "p2", serial: 3, drops: [
+    { id: "p2:death:3:dirt", kind: "death", type: "dirt", quantity: 9, x: 300, depth: -30 },
+  ] }) });
+  check("les piles de mort reçues sont relayées sans perdre les quantités",
+    events[events.length - 1].t === "deathDrop" && events[events.length - 1].drops[0].quantity === 9);
+
   net.close();
+  const sentBeforeClose = socket.sent.length;
+  net.dropInventory(100, -30, { grass: 1 }, 9);
+  check("aucun butin réseau n'est envoyé après fermeture", socket.sent.length === sentBeforeClose);
 }
 
 async function testNoServer() {

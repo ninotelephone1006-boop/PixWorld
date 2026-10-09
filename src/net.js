@@ -141,6 +141,9 @@ window.PixWorldNet = (() => {
       placeBlock(column, row, type, serial) {
         if (joined && mode === "online") send({ t: "placeBlock", column, row, type, serial });
       },
+      dropInventory(x, depth, inventory, serial) {
+        if (joined && mode === "online") send({ t: "deathDrop", x, depth, inventory, serial });
+      },
       pickupDrop(dropId) {
         if (joined && mode === "online") send({ t: "minePickup", dropId: String(dropId) });
       },
