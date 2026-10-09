@@ -19,6 +19,7 @@ window.PixWorldEffects = (() => {
   const MAX_TEXTS = 40;
   const MAX_RINGS = 40;
   const FONT_STACK = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
+  const BLADE_COLORS = ["#5fae3f", "#8fd35a", "#3c7d36", "#c8e879"];
 
   function clamp(value, min, max) {
     return value < min ? min : value > max ? max : value;
@@ -327,6 +328,35 @@ window.PixWorldEffects = (() => {
       ring(x, footY - 30, { from: 50, to: 6, duration: 0.4, color: "#ffffff", width: 2 });
     }
 
+    /**
+     * Brins d'herbe projetés par le passage d'un personnage : petites feuilles
+     * effilées qui tournent, lancées dans le sens de la marche.
+     */
+    function blades(x, y, options) {
+      const o = options || {};
+      const count = o.count == null ? 3 : o.count;
+      const direction = o.direction == null ? 0 : o.direction; // -1, 0, 1
+      for (let i = 0; i < count; i++) {
+        const side = direction === 0 ? (i % 2 ? 1 : -1) : direction;
+        particle({
+          x: x + rand(-8, 8),
+          y: y + rand(-5, 3),
+          vx: side * rand(35, 120),
+          vy: -rand(60, 150),
+          gravity: 480,
+          drag: 1.2,
+          life: rand(0.45, 0.8),
+          size: rand(2.2, 3.4),
+          color: pick(BLADE_COLORS),
+          shape: "blade",
+          rotation: rand(0, Math.PI * 2),
+          spin: rand(-9, 9),
+          fade: "late",
+          shrink: false,
+        });
+      }
+    }
+
     /** Étincelles de soin (régénération qui démarre). */
     function heal(x, y) {
       for (let i = 0; i < 7; i++) {
@@ -440,6 +470,18 @@ window.PixWorldEffects = (() => {
         ctx.closePath();
         ctx.fill();
         ctx.restore();
+      } else if (p.shape === "blade") {
+        // Brin d'herbe : petite feuille effilée, qui tourne sur elle-même.
+        ctx.save();
+        ctx.translate(sx, p.y);
+        ctx.rotate(p.rotation);
+        ctx.beginPath();
+        ctx.moveTo(-size * 1.8, 0);
+        ctx.quadraticCurveTo(0, -size * 0.9, size * 1.8, 0);
+        ctx.quadraticCurveTo(0, size * 0.9, -size * 1.8, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
       } else if (p.shape === "plus") {
         ctx.fillRect(sx - size / 2, p.y - size * 1.5, size, size * 3);
         ctx.fillRect(sx - size * 1.5, p.y - size / 2, size * 3, size);
@@ -528,6 +570,7 @@ window.PixWorldEffects = (() => {
       knockout,
       respawn,
       heal,
+      blades,
       shake: doShake,
       setVignette(level) {
         vignetteLevel = clamp(level, 0, 1);
