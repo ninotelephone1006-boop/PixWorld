@@ -178,7 +178,7 @@ function registerPlayer(socket) {
     joined: false, // devient vrai à la réception du "hello" (pseudo choisi)
     messages: 0,
     windowStart: Date.now(),
-    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0, hp: 100 },
+    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0, hp: 100, d: false },
   };
   players.set(id, player);
 
@@ -252,6 +252,7 @@ function handleMessage(player, message) {
       c: cleanCharacter(message.c || player.character),
       n: Math.floor(clampNumber(message.n, 0, 2147483647, player.state.n || 0)),
       hp: Math.round(clampNumber(message.hp, 0, 100, player.state.hp == null ? 100 : player.state.hp)),
+      d: Boolean(message.d), // K.O. en cours : les autres jouent l'animation
     };
   }
 }

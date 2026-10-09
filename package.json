@@ -1,12 +1,12 @@
 {
   "name": "pixworld",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Prototype de jeu de plateforme 2D multijoueur en HTML Canvas",
   "scripts": {
     "start": "node server/server.js",
     "dev": "node server/server.js",
-    "test": "node test/characters.test.js && node test/net.test.js"
+    "test": "node test/characters.test.js && node test/audio.test.js && node test/effects.test.js && node test/net.test.js"
   },
   "engines": {
     "node": ">=18"

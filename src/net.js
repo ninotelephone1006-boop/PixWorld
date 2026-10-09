@@ -194,6 +194,7 @@ window.PixWorldNet = (() => {
           c: peer.character,
           n: message.n,
           hp: message.hp,
+          d: message.d,
         };
       }
     }

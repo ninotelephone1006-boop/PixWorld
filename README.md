@@ -13,16 +13,16 @@ PORT=8080 npm start
 
 Le menu d'accueil apparaît dès l'ouverture du jeu. Choisis un personnage et un pseudo, puis sélectionne **Entrer dans l'arène**. Le nom et le héros choisi sont mémorisés dans le navigateur. En cours de partie, `Échap` ouvre le menu pause : tu peux reprendre, changer de héros ou revenir à l'écran titre.
 
-Quatre combattants ont chacun leur sprite animé et leur propre attaque visuelle :
+Quatre combattants ont chacun **leur propre feuille de sprite** (plus aucune teinte de couleur n'est appliquée : chaque héros garde ses vraies couleurs) et leur propre attaque :
 
-| Héros | Style | Attaque | Dégâts |
-| --- | --- | --- | --- |
-| **Kage — Ninja** | Éclaireur rapide | Shuriken tournoyant | 8 |
-| **Sora — Archère** | Tir à distance rapide | Flèche de vent | 12 |
-| **Raiden — Samouraï** | Mêlée | Coupe du tonnerre en arc | 20 |
-| **Yume — Arcaniste** | Magie à distance | Orbe astral lumineux | 16 |
+| Héros | Style | Attaque | Dégâts | Recul |
+| --- | --- | --- | --- | --- |
+| **Kage — Ninja** | Éclaireur rapide | Shuriken tournoyant, lancé très vite | 8 | faible |
+| **Sora — Archère** | Tir à distance | Flèche de vent, décochée après l'armement de l'arc | 12 | moyen |
+| **Raiden — Samouraï** | Mêlée | Coupe du tonnerre : enchaînement de trois coupes, la 3e plus large | 20 (25 pour la 3e) | fort |
+| **Yume — Arcaniste** | Magie à distance | Orbe astral, après une courte incantation | 16 | fort |
 
-Le choix du héros est synchronisé entre joueurs : sprites, mouvements, déclenchements d'attaque et points de vie sont visibles par les autres.
+Le choix du héros est synchronisé entre joueurs : sprites, mouvements, déclenchements d'attaque, points de vie et K.O. sont visibles par les autres.
 
 ## Barre de vie
 
@@ -30,10 +30,19 @@ Chaque joueur porte une **barre de vie** au-dessus de son personnage (et une pet
 
 - un projectile (shuriken, flèche, orbe) enlève des points de vie à la personne touchée ;
 - la coupe de Raiden blesse en mêlée, dans l'arc lumineux qu'elle dessine ;
-- après 5 secondes sans dégâts, la vie remonte doucement ;
-- à 0 point de vie, le joueur est **K.O.** et réapparaît au camp de départ en pleine forme (avec une courte invulnérabilité).
+- chaque coup **repousse** la victime, la fait clignoter en blanc et affiche les **dégâts en chiffres flottants** ;
+- côté victime : flash rouge, secousse de caméra, image « blessé » et court étourdissement ;
+- sous 35 points de vie, l'écran se teinte de rouge sur les bords et le cœur bat ;
+- après 5 secondes sans dégâts, la vie remonte doucement (petites étincelles vertes) ;
+- à 0 point de vie, le joueur est **K.O.** : explosion d'éclats, onde de choc, flash et courte pause au sol, puis réapparition au camp de départ en pleine forme (avec une courte invulnérabilité).
 
-Chaque client gère ses propres points de vie et les transmet aux autres 20 fois par seconde.
+Chaque client gère ses propres points de vie et les transmet aux autres 20 fois par seconde, avec un drapeau de K.O. pour que tout le monde voie l'animation. Les impacts de tes attaques sur les autres sont affichés immédiatement (étincelles, anneaux, son) ; les points de vie qui en découlent arrivent par le réseau.
+
+## Effets sonores
+
+Tous les sons sont **synthétisés dans le navigateur** (aucun fichier audio) par `src/audio.js`, un petit moteur dérivé de ZzFX : une quarantaine d'effets pour l'interface (survol, sélection, saisie, pause…), les déplacements (saut, atterrissage, pas), chaque attaque (lancer de shuriken, arc qui s'arme puis décoche, trois coupes de sabre, incantation puis orbe), les impacts, les blessures, le K.O., la réapparition, le cœur qui bat, la régénération et les arrivées / départs de joueurs. Les sons des autres joueurs sont **spatialisés** (balance stéréo et volume selon leur distance).
+
+Le bouton 🔊 du HUD (ou la touche `M`) coupe le son ; le curseur de volume du menu est mémorisé dans le navigateur.
 
 ## Multijoueur
 
@@ -60,17 +69,21 @@ Le mode est indiqué en haut à droite. Si le serveur redémarre, le jeu retente
 - `Espace` : sauter
 - `X` ou clic gauche : lancer l'attaque du héros (le clic choisit aussi la direction)
 - `Échap` : ouvrir le menu pause / reprendre
+- `M` : couper / rétablir le son
 
 ## Structure du projet
 
 - `index.html` — canvas, HUD et structure de l'écran titre.
 - `assets/menu.css` — menu animé et responsive, sélection des héros et écran pause.
-- `src/characters.js` — catalogue des combattants : corps, surcouches d'arme et réglages de leurs attaques.
-- `src/game.js` — boucle de jeu, spritesheets, barres de vie, effets d'attaque et interpolation des joueurs distants.
+- `src/characters.js` — catalogue des combattants : feuille de sprite, réglages de combat (dégâts, recul, délai du projectile) et sons de chaque héros.
+- `src/game.js` — boucle de jeu, spritesheets, barres de vie, combat (recul, K.O., combo), effets d'attaque et interpolation des joueurs distants.
+- `src/effects.js` — particules, chiffres de dégâts, ondes de choc, secousses de caméra, flashs et vignette.
+- `src/audio.js` — synthèse des effets sonores (ZzFX), spatialisation, volume et sourdine.
 - `src/net.js` — WebSocket, repli sur `BroadcastChannel` et reconnexion.
+- `tools/make-sprites.py` — générateur (Pillow) des feuilles de sprites originales de Sora et Raiden.
 - `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz, sans conserver de données.
 
-Chaque client envoie sa position, son animation, son personnage, ses points de vie et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde fait 2600 px de large et est partagé par tous. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné et un joueur muet pendant plus de 20 s est déconnecté.
+Chaque client envoie sa position, son animation, son personnage, ses points de vie, son état de K.O. et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde fait 2600 px de large et est partagé par tous. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné et un joueur muet pendant plus de 20 s est déconnecté.
 
 ## Tests
 
@@ -78,8 +91,8 @@ Chaque client envoie sa position, son animation, son personnage, ses points de v
 npm test
 ```
 
-Les tests (`test/net.test.js`, sans dépendance) rejouent les transports en ligne et local, la reconnexion et la synchronisation des héros / attaques à l'aide de faux WebSocket et `BroadcastChannel`.
+Les tests (sans dépendance) vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), la synthèse de chaque effet sonore (`test/audio.test.js`), le moteur d'effets visuels (`test/effects.test.js`) et rejouent les transports en ligne et local, la reconnexion et la synchronisation des héros / attaques à l'aide de faux WebSocket et `BroadcastChannel` (`test/net.test.js`).
 
 ## Sprites et décor
 
-Les personnages utilisent des spritesheets pixel art CC0 (animations idle, course, saut et attaque). Sora et Raiden sont composés de deux feuilles : le corps du ninja, puis la feuille d'arme (arc ou sabre) dessinée par-dessus — c'est le montage voulu par le pack d'origine, dont les feuilles d'arc et de sabre ne contiennent que l'arme. Le décor en parallaxe vient du pack « Sunny Land » d'Ansimuz. Le menu ajoute ses cadres, grilles, lueurs et rotations en CSS/canvas ; il n'intègre aucune texture tierce non créditée. Les sources et licences sont détaillées dans [`assets/CREDITS.md`](assets/CREDITS.md).
+Kage et Yume utilisent des spritesheets pixel art CC0 (animations idle, course, saut, attaque, blessé et K.O.). Sora (archère à capuche verte, arc et carquois) et Raiden (samouraï au kabuto et à l'armure rouge) ont leurs **propres feuilles originales**, dessinées pour PixWorld dans le même format 256 × 128 et générées par `tools/make-sprites.py`. Aucune teinte n'est appliquée aux sprites ; la couleur d'accent de chaque héros ne sert plus qu'à l'interface (cartes du menu, pastille du pseudo, liste des joueurs). Le décor en parallaxe vient du pack « Sunny Land » d'Ansimuz. Le menu ajoute ses cadres, grilles, lueurs et rotations en CSS/canvas ; il n'intègre aucune texture tierce non créditée. Les sources et licences sont détaillées dans [`assets/CREDITS.md`](assets/CREDITS.md).

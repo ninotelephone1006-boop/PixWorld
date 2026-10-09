@@ -125,6 +125,40 @@
         margin-left: 4px;
       }
 
+      .sound-toggle {
+        display: inline-grid;
+        width: 30px;
+        height: 26px;
+        margin-left: 6px;
+        padding: 0;
+        place-items: center;
+        border: 1px solid rgb(255 255 255 / 28%);
+        border-radius: 8px;
+        background: rgb(255 255 255 / 10%);
+        color: #fff;
+        font: inherit;
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        pointer-events: auto;
+        transition: background 0.15s ease, transform 0.15s ease;
+      }
+
+      .sound-toggle:hover {
+        background: rgb(255 255 255 / 22%);
+        transform: translateY(-1px);
+      }
+
+      .sound-toggle:focus-visible {
+        outline: 2px solid #ffbf67;
+        outline-offset: 2px;
+      }
+
+      .sound-toggle[aria-pressed="true"] {
+        background: rgb(255 107 107 / 24%);
+        border-color: rgb(255 107 107 / 55%);
+      }
+
       kbd {
         display: inline-grid;
         min-width: 25px;
@@ -438,6 +472,7 @@
           <span class="control"><kbd>X</kbd> attaquer</span>
           <span class="control"><kbd class="space">CLIC G</kbd> attaquer</span>
           <span class="control"><kbd>ESC</kbd> menu</span>
+          <button class="sound-toggle" id="sound-toggle" type="button" title="Couper le son (M)" aria-label="Couper le son (M)" aria-pressed="false">🔊</button>
         </div>
       </section>
 
@@ -519,6 +554,14 @@
                   required
                 />
               </label>
+              <div class="menu-field menu-sound" role="group" aria-label="Réglage du son">
+                <span class="menu-label">Son · effets sonores</span>
+                <div class="menu-sound-row">
+                  <button class="menu-mute" id="menu-mute" type="button" title="Couper le son (M)" aria-label="Couper le son (M)" aria-pressed="false">🔊</button>
+                  <input class="menu-volume" id="menu-volume" type="range" min="0" max="100" step="5" value="80" aria-label="Volume des effets sonores" />
+                  <output class="menu-volume-value" id="menu-volume-value" for="menu-volume">80 %</output>
+                </div>
+              </div>
             </div>
 
             <div class="menu-actions">
@@ -537,6 +580,8 @@
 
     <script src="src/net.js"></script>
     <script src="src/characters.js"></script>
+    <script src="src/audio.js"></script>
+    <script src="src/effects.js"></script>
     <script src="src/game.js"></script>
   </body>
 </html>
