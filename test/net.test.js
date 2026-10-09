@@ -65,6 +65,7 @@ function makeBrowser(options) {
     Math,
     Date,
     navigator: {},
+    URL,
     localStorage: options.storage || createStorage(),
     setTimeout: (fn, ms) => {
       const id = setTimeout(fn, ms);
@@ -78,9 +79,12 @@ function makeBrowser(options) {
       return id;
     },
     clearInterval: (id) => clearInterval(id),
-    location: { protocol: "http:", host: "localhost:3000", search: "" },
+    location: options.location || { protocol: "http:", host: "localhost:3000", pathname: "/", search: "" },
     WebSocket: options.noServer ? undefined : FakeWebSocket,
   };
+  if (Object.prototype.hasOwnProperty.call(options, "serverUrl")) {
+    sandbox.PixWorldConfig = { serverUrl: options.serverUrl };
+  }
   sandbox.window = sandbox;
   sandbox.addEventListener = () => {};
   sandbox.removeEventListener = () => {};
@@ -195,6 +199,43 @@ async function testReconnect() {
   net.close();
 }
 
+async function testSharedPublicServer() {
+  console.log("Même arène publique depuis deux sites différents");
+  const serverUrl = "https://arena.pixworld.example";
+  const paris = makeBrowser({
+    location: { protocol: "https:", host: "jeu-paris.example", pathname: "/" },
+    serverUrl,
+  });
+  const marseille = makeBrowser({
+    location: { protocol: "https:", host: "jeu-marseille.example", pathname: "/" },
+    serverUrl,
+  });
+  const parisNet = paris.sandbox.PixWorldNet.connect({ onEvent: () => {} });
+  const marseilleNet = marseille.sandbox.PixWorldNet.connect({ onEvent: () => {} });
+
+  check("deux sites différents ouvrent la même URL WSS publique",
+    paris.sockets[0].url === "wss://arena.pixworld.example/ws" &&
+    marseille.sockets[0].url === paris.sockets[0].url,
+    paris.sockets[0].url + " / " + marseille.sockets[0].url);
+  check("le bouton de partage garde le lien du jeu, pas l'URL du serveur",
+    parisNet.serverInfo.httpUrl === "https://jeu-paris.example/" &&
+    marseilleNet.serverInfo.httpUrl === "https://jeu-marseille.example/");
+  check("le statut identifie bien l'arène centrale",
+    parisNet.serverInfo.display === "arena.pixworld.example");
+
+  parisNet.close();
+  marseilleNet.close();
+
+  const invalid = makeBrowser({
+    location: { protocol: "https:", host: "jeu.example", pathname: "/" },
+    serverUrl: "ftp://arena.example",
+  });
+  const invalidNet = invalid.sandbox.PixWorldNet.connect({ onEvent: () => {} });
+  check("une URL de serveur invalide n'ouvre pas une arène différente en silence",
+    invalidNet.mode === "unavailable" && invalid.sockets.length === 0, invalidNet.mode);
+  invalidNet.close();
+}
+
 async function testAddressAndFull() {
   const browser = makeBrowser({ storage: createStorage({ "pixworld.server": "192.168.1.8" }) });
   browser.sandbox.location = { protocol: "https:", host: "jeu.example", search: "?server=other.example" };
@@ -214,6 +255,7 @@ async function testAddressAndFull() {
   await testOnlineGame();
   await testNoServer();
   await testReconnect();
+  await testSharedPublicServer();
   await testAddressAndFull();
   process.exitCode = failures ? 1 : 0;
 })();

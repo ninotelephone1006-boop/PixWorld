@@ -31,6 +31,23 @@ Un redémarrage remet les connexions à zéro ; les clients se reconnectent.
 Cette configuration ne déploie rien à elle seule : la création du service reste
 à effectuer par le propriétaire du compte d’hébergement.
 
+Par défaut, la page et le WebSocket utilisent la même adresse publique. Si
+l’interface et le serveur sont hébergés séparément, configure **une seule URL
+publique de serveur pour tous les joueurs**, avant le chargement de `src/net.js` :
+
+```html
+<script>
+  window.PixWorldConfig = { serverUrl: "https://pixworld-server.onrender.com" };
+</script>
+<script src="src/net.js"></script>
+```
+
+L’URL HTTPS est automatiquement convertie en WSS ; une URL WSS finissant par
+`/ws` fonctionne aussi. Les joueurs partagent alors le lien de la page du jeu,
+mais chaque navigateur rejoint le même WebSocket central. Ne configure pas
+`localhost`, `127.0.0.1` ou une IP privée pour une partie entre villes : ces
+adresses ne sont visibles que sur l’appareil ou le réseau local qui les héberge.
+
 ### Développement local
 
 ```sh

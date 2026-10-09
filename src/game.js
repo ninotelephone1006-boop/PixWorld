@@ -452,7 +452,7 @@
 
   function describeMode(mode) {
     if (mode === "online") return { label: "en ligne", tone: "online", text: "Tu es dans l’arène commune. Invite tes amis avec le lien du jeu !" };
-    if (mode === "reconnect") return { label: "reconnexion", tone: "local", text: "Arène indisponible, nouvelle tentative automatique…" };
+    if (mode === "reconnect") return { label: "reconnexion", tone: "local", text: "Serveur injoignable. Vérifie que tu ouvres le lien public de l'arène, pas localhost ou une adresse Wi-Fi privée." };
     if (mode === "full") return { label: "arène pleine", tone: "local", text: "L’arène est pleine. Nouvelle tentative automatique…" };
     if (mode === "unavailable") return { label: "hors ligne", tone: "solo", text: "Ouvre le lien du jeu hébergé pour rejoindre les autres joueurs." };
     return { label: "connexion…", tone: "local", text: "Connexion à l’arène commune…" };
@@ -462,8 +462,10 @@
     const target = net && net.serverInfo;
     if (!menuServerShare) return;
     menuServerShare.hidden = !target;
-    if (target) menuServerAddress.textContent = target.httpUrl + "/";
-    if (menuServerHint) menuServerHint.textContent = "Partage le lien du jeu : tes amis rejoignent la même arène, sans configuration. Le site doit être accessible sur Internet pour jouer depuis des réseaux différents.";
+    if (target) menuServerAddress.textContent = target.httpUrl;
+    if (menuServerHint) menuServerHint.textContent = target
+      ? "Pour jouer depuis des villes différentes, tout le monde ouvre ce même lien public : vous rejoignez le serveur " + target.display + ". localhost et les adresses Wi-Fi privées ne sont pas accessibles à distance."
+      : "Ouvre le jeu depuis le lien public de l'arène. Un serveur hébergé sur Internet est nécessaire pour jouer depuis des réseaux différents.";
   }
 
   /** Copie l'adresse à partager dans le presse-papiers. */

@@ -438,6 +438,7 @@ function createBrowser(options) {
     Math,
     Date,
     Promise,
+    URL,
     Uint8ClampedArray,
     Float32Array,
     ArrayBuffer,

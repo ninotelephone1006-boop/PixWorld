@@ -4,12 +4,47 @@ window.PixWorldNet = (() => {
   const CHARACTER_IDS = new Set(["ninja", "archer", "samurai", "mage"]);
   const cleanCharacter = (value) => CHARACTER_IDS.has(value) ? value : "ninja";
 
-  // Aucune IP saisie, URL d'invitation spéciale ou ancienne préférence locale.
+  // Par défaut, la page et l'arène sont servies par le même site (Render, par
+  // exemple). Si l'interface est hébergée ailleurs, le propriétaire peut
+  // définir window.PixWorldConfig.serverUrl avant de charger ce script afin
+  // que tous les clients rejoignent exactement le même serveur public.
   function resolveServerUrl() {
     const loc = window.location;
     if (!loc || !/^https?:$/.test(loc.protocol) || !loc.host) return null;
-    return { url: (loc.protocol === "https:" ? "wss://" : "ws://") + loc.host + "/ws",
-      httpUrl: loc.protocol + "//" + loc.host, display: loc.host };
+
+    const pageUrl = loc.protocol + "//" + loc.host + (loc.pathname || "/");
+    const configured = window.PixWorldConfig && window.PixWorldConfig.serverUrl;
+    let url;
+    let display = loc.host;
+
+    if (configured != null && String(configured).trim()) {
+      try {
+        url = new URL(String(configured).trim());
+      } catch (_) {
+        return null;
+      }
+      if (!url.host || url.username || url.password || url.search || url.hash ||
+          (url.pathname !== "/" && url.pathname !== "/ws")) return null;
+
+      // Accepte l'URL HTTPS du service ou son URL WSS. Une page HTTPS ne doit
+      // jamais tenter une connexion WebSocket non chiffrée (bloquée par le navigateur).
+      if (url.protocol === "https:") url.protocol = "wss:";
+      else if (url.protocol === "http:") url.protocol = loc.protocol === "https:" ? "wss:" : "ws:";
+      else if (url.protocol === "ws:" && loc.protocol === "https:") url.protocol = "wss:";
+      if (url.protocol !== "ws:" && url.protocol !== "wss:") return null;
+      url.pathname = "/ws";
+      display = url.host;
+    } else {
+      url = new URL(pageUrl);
+      url.protocol = loc.protocol === "https:" ? "wss:" : "ws:";
+      url.pathname = "/ws";
+      url.search = "";
+      url.hash = "";
+    }
+
+    // Partager l'adresse du jeu, pas celle du WebSocket si l'interface et le
+    // serveur sont hébergés sur deux domaines différents.
+    return { url: url.href, httpUrl: pageUrl, display };
   }
 
   function connect(options) {
