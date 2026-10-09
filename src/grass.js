@@ -8,12 +8,14 @@
  * des touffes et signale les événements à src/game.js, qui les traduit en
  * sons spatialisés et en particules.
  *
- *   const grass = PixWorldGrass.create({ onRustle, onBlades });
+ *   const grass = PixWorldGrass.create({ onRustle, onBlades, canTouch });
  *   grass.update(delta, [{ id, x, width, vx, gap }]);   // coordonnées monde
  *   const pose = grass.poseFor(tile);                    // null au repos
  *
  * Coordonnées monde : une tuile de sol fait 64 px et la touffe occupe ses
- * 48 px centraux. `gap` est la hauteur des pieds au-dessus du sol (0 = posé).
+ * 48 px centraux. `gap` est la hauteur des pieds au-dessus du sol (0 = posé ;
+ * négatif = sous la surface, creusé, sans contact). `canTouch(tile)` dit si
+ * la touffe existe encore (son bloc de surface n'a pas été miné).
  */
 window.PixWorldGrass = (() => {
   "use strict";
@@ -71,13 +73,19 @@ window.PixWorldGrass = (() => {
     const random = typeof settings.random === "function" ? settings.random : Math.random;
     const onRustle = settings.onRustle || (() => {});
     const onBlades = settings.onBlades || (() => {});
+    // Une touffe n'existe que si son bloc de surface est encore là (minage) :
+    // src/game.js fournit ce test, sinon toutes les touffes réagissent.
+    const canTouch = typeof settings.canTouch === "function" ? settings.canTouch : () => true;
     const states = new Map(); // tuile → ressort, seulement pour les touffes non revenues au repos
     let clock = 0;
 
-    /** Sens, vitesse et force d'un personnage posé ou presque sur le sol, sinon null. */
+    /**
+     * Sens, vitesse et force d'un personnage posé ou presque sur le sol, sinon
+     * null. Un personnage enfoncé sous la surface (gap négatif) ne la touche pas.
+     */
     function contactOf(walker) {
       const gap = Number(walker.gap) || 0;
-      if (gap > CONTACT_GAP) return null;
+      if (gap > CONTACT_GAP || gap < -CONTACT_MARGIN) return null;
       const vx = Number(walker.vx) || 0;
       const speed = Math.abs(vx);
       if (speed < MIN_SPEED) return null;
@@ -106,7 +114,7 @@ window.PixWorldGrass = (() => {
         const last = Math.floor((walker.x + walker.width + reach - TUFT_INSET) / TILE);
         for (let tile = first; tile <= last; tile++) {
           const tuft = tuftFor(tile);
-          if (!tuft) continue;
+          if (!tuft || !canTouch(tile)) continue;
           if (walker.x + walker.width < tuft.x0 - reach || walker.x > tuft.x1 + reach) continue;
           // Si plusieurs personnages touchent la même touffe, le plus rapide la mène.
           const previous = touched.get(tile);

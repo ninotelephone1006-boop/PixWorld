@@ -71,20 +71,29 @@ Chaque joueur porte une **barre de vie** au-dessus de son personnage (et une pet
 
 Chaque client gère ses propres points de vie et les transmet aux autres 20 fois par seconde, avec un drapeau de K.O. pour que tout le monde voie l'animation. Les impacts de tes attaques sur les autres sont affichés immédiatement (étincelles, anneaux, son) ; les points de vie qui en découlent arrivent par le réseau.
 
-## Monde procédural et biomes
+## Monde : prairie plate et terrain en blocs
 
-Le niveau n'est plus un simple plat : il est **généré à partir d'une graine** (`src/world.js`). Tous les joueurs partagent la même graine, donc voient le même relief, les mêmes plateformes et le même décor, sans rien échanger de plus sur le réseau.
+Le monde est une **prairie plate** de 100 000 px de large (`src/world.js`), identique pour tous les joueurs. Son sol est un **terrain en blocs carrés** (`src/terrain.js`), que l'on peut creuser : voir la section suivante.
 
-- **Quatre biomes**, disposés en bandes le long du monde (environ 8 300 px au total) : la **prairie** du départ, puis trois biomes dans un ordre propre à la graine :
-  - **Dunes dorées** — sable, cactus, arbres morts, ruines de grès, soleil brûlant et particules de sable qui filent ;
-  - **Taïga gelée** — pins enneigés, congères, stalactites de glace, neige qui tombe ;
-  - **Terres de cendre** — roche basaltique aux fissures incandescentes, mares de lave, cheminées qui fument, braises qui montent.
-- **Relief** : des collines plus ou moins hautes selon le biome, qui se fondent doucement d'un biome à l'autre. Le relief est toujours franchissable à pied.
-- **Plateformes flottantes** : on les atteint en sautant, on se pose dessus par le haut et on les traverse par-dessous.
-- **Annonce** : entrer dans un nouveau biome affiche son nom et sa description.
-- **Herbe interactive** : elle ne se trouve que dans la prairie ; ailleurs, personne ne la plie.
+Le rendu est dans `src/block-view.js` pour le sol (blocs, fond de grotte, contour, fissures, objets) et dans `src/scenery.js` pour le ciel, les couches lointaines et les particules d'ambiance. Les nuages et les collines en parallaxe viennent du décor « Sunny Land » (Ansimuz) ; le dégradé du ciel, le soleil, le halo et les particules de pollen sont dessinés en code.
 
-Le rendu est dans `src/scenery.js` : les textures de sol (corps de terre, sable, neige, basalte) sont **peintes à la volée** sur de petites toiles, sans image à télécharger ; le ciel est en dégradé avec soleil et halo ; des couches lointaines en silhouettes défilent en parallaxe ; le relief porte une surface propre à son biome (herbe, congères, cendre) ; des particules d'ambiance et un voile de couleur complètent l'ambiance. La prairie garde ses décors d'origine (Sunny Land) fondus avec le reste.
+## Minage et inventaire
+
+Le sol est fait de **blocs carrés de 30 px**, alignés sur la surface, du haut vers le bas :
+
+- **1 couche d'herbe** (la surface), **4 couches de terre**, **10 couches de pierre** ;
+- une **roche-mère** incassable tout en bas : sans elle, un personnage qui creuse jusqu'au bout tomberait dans le vide.
+
+Un bloc mesure la moitié de la hauteur du héros : **deux blocs font 60 px**, la taille du personnage. Le héros fait aussi 42 px de large : il faut donc creuser un passage de **deux blocs** de large pour entrer dans un trou ou descendre.
+
+- **Viser** : un contour blanc entoure le bloc sous la souris. Il devient rouge s'il est hors de portée (4,5 blocs autour du héros) ou incassable.
+- **Miner** : maintenir le **clic gauche** sur le bloc. Des fissures apparaissent par étapes ; au bout de **deux secondes**, le bloc se casse. Relâcher le bouton, viser un autre bloc ou s'éloigner remet la progression à zéro.
+- **Objets** : le bloc laisse un objet du même type, qui jaillit, retombe et se pose sur le terrain. Un objet proche est attiré vers le héros, qui le ramasse dès qu'il le touche (après un très court délai) : un bloc tombé au fond d'un trou étroit remonte donc jusqu'à lui.
+- **Inventaire** : une barre de **neuf emplacements**, au centre à droite de l'écran (`src/inventory.js`, `src/hotbar.js`). Chaque emplacement affiche le bloc et sa quantité, en piles de 64. La **molette** ou les touches `1` à `9` changent l'emplacement sélectionné. Quand l'inventaire est plein, l'objet reste au sol.
+- **Sons** : coups de pioche, cassure et ramassage sont synthétisés (`src/audio.js`).
+- **Textures** : herbe, terre, pierre et roche-mère sont des pixel art de 16 × 16 px, tirés du dépôt GitHub [malcolmriley/unused-textures](https://github.com/malcolmriley/unused-textures) (CC BY 4.0) ; voir [`assets/CREDITS.md`](assets/CREDITS.md).
+
+Le minage et l'inventaire sont **locaux** à chaque navigateur : un bloc miné n'est pas modifié chez les autres joueurs, et l'état repart de zéro au rechargement de la page. Un joueur qui creuse reste en revanche visible **sous la surface** pour les autres : sa profondeur est relayée par le serveur.
 
 ## Herbe interactive
 
@@ -94,7 +103,7 @@ Les touffes d'herbe posées sur le sol réagissent au passage des personnages, l
 - **elles font du bruit** : un froissement court, plus discret à faible allure, et spatialisé pour les joueurs distants ;
 - **parfois, quelques brins s'envolent** : environ un froissement sur trois s'accompagne de petites feuilles projetées dans le sens de la marche.
 
-Les touffes sont posées sur le relief de la prairie. L'herbe du premier plan, au bas de l'écran, reste décorative. Sauter au-dessus d'une touffe ne la fait pas bouger, et une marche trop lente ne produit ni son ni brin. Au repos, le rendu est identique à celui du décor d'origine. La logique est dans `src/grass.js`, séparée du dessin et du son.
+Les touffes sont posées sur la surface de la prairie, sur les blocs d'herbe : miner le bloc de surface fait disparaître sa touffe, et un personnage enfoncé sous la surface ne la fait pas plier. Sauter au-dessus d'une touffe ne la fait pas bouger, et une marche trop lente ne produit ni son ni brin. Au repos, le rendu est identique à celui du décor d'origine. La logique est dans `src/grass.js`, séparée du dessin et du son.
 
 ## Effets sonores
 
@@ -139,7 +148,9 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `A` (AZERTY) ou `Q` (QWERTY), ou flèche gauche : aller à gauche
 - `D` ou flèche droite : aller à droite
 - `Espace` : sauter
-- `X` ou clic gauche : lancer l'attaque du héros (le clic choisit aussi la direction)
+- `X` : lancer l'attaque du héros
+- clic gauche maintenu sur un bloc à portée : miner (deux secondes)
+- molette ou touches `1` à `9` : choisir un emplacement de la barre d'inventaire
 - `Échap` : ouvrir le menu pause / reprendre
 - `M` : couper / rétablir le son
 
@@ -150,8 +161,15 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `src/characters.js` — catalogue des combattants : feuille de sprite, réglages de combat (dégâts, recul, délai du projectile) et sons de chaque héros.
 - `src/game.js` — boucle de jeu, spritesheets, barres de vie, combat (recul, K.O., combo), effets d'attaque, interpolation des joueurs distants et touffes d'herbe du sol.
 - `src/effects.js` — particules (dont les brins d'herbe), chiffres de dégâts, ondes de choc, secousses de caméra, flashs et vignette.
-- `src/world.js` — monde procédural : graine, biomes en bandes, relief, plateformes, décor placé et collisions (atterrissage, appui sur le relief).
-- `src/scenery.js` — rendu des biomes : textures de sol peintes à la volée, ciels, couches lointaines, surfaces (herbe, neige, cendre), décor, plateformes et particules d'ambiance.
+- `src/world.js` — monde : prairie plate, sur 100 000 px de large.
+- `src/scenery.js` — ciel, couches lointaines, particules d'ambiance et voile de couleur.
+- `src/terrain.js` — terrain en blocs : couches herbe, terre, pierre et roche-mère, casse des blocs, collisions (sol, murs, plafond) au pas de 2 px.
+- `src/mining.js` — minage au clic maintenu : case visée, progression de 2 s, portée, coups sonores.
+- `src/drops.js` — objets lâchés par les blocs : chute, attraction vers le héros, ramassage au contact.
+- `src/inventory.js` — inventaire de neuf emplacements, piles de 64, sélection en boucle.
+- `src/block-view.js` — rendu des blocs : textures agrandies une fois, fond de grotte, contour, fissures, objets lâchés.
+- `src/hotbar.js` — barre d'inventaire à l'écran, au centre à droite, avec quantités et étiquette du bloc choisi.
+- `assets/blocks/` — textures pixel art 16 × 16 : herbe, terre, pierre, roche-mère (CC BY 4.0).
 - `src/grass.js` — herbe interactive : ressort de chaque touffe du sol, froissements et brins, calculés sans dessin ni son (`window.PixWorldGrass`).
 - `src/audio.js` — lecture des effets sonores : banque de fichiers, pas d'herbe échantillonnés, froissement de l'herbe synthétisé, autres matières synthétisées en secours, spatialisation, volume et sourdine.
 - `src/sfx-library.js` — catalogue généré des sons (événement → variantes, sources d'origine et gain), écrit par `tools/build-sfx.mjs`.
@@ -161,7 +179,7 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `tools/build-sfx.mjs` — récupère les sons CC0 sur GitHub, les adapte (mono, 44,1 kHz, silences coupés, 0,8 s max) et régénère `assets/sfx/` + `src/sfx-library.js`.
 - `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz, sans conserver de données. Il écoute sur toutes les interfaces et fournit `/healthz` pour le déploiement.
 
-Chaque client envoie sa position, son animation, son personnage, ses points de vie, son état de K.O. et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde est généré à partir d'une graine commune (environ 8 300 px de large) et partagé par tous. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné et un joueur muet pendant plus de 20 s est déconnecté.
+Chaque client envoie sa position (y compris sa profondeur sous la surface), son animation, son personnage, ses points de vie, son état de K.O. et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde est une prairie plate de 100 000 px de large, identique pour tous ; seuls les blocs minés restent locaux. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné et un joueur muet pendant plus de 20 s est déconnecté.
 
 ## Tests
 
@@ -169,7 +187,7 @@ Chaque client envoie sa position, son animation, son personnage, ses points de v
 npm test
 ```
 
-Les tests (sans dépendance) vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio — synthèse de chaque preset, lecture des pas d'herbe dédiés, décodage des fichiers et repli synthèse avec un faux navigateur (`test/audio.test.js`), l'intégrité et la correspondance des sources de la banque de sons (`test/sfx-bank.test.js`), le moteur d'effets visuels, brins compris (`test/effects.test.js`), le monde procédural — graine, biomes, marchabilité du relief, plateformes atteignables et atterrissages (`test/world.test.js`), le rendu des biomes sur un contexte factice (`test/scenery.test.js`), l'herbe interactive — pose des touffes, courbure et retour au repos, froissements espacés, brins occasionnels (`test/grass.test.js`) — et vérifient la connexion automatique, la reconnexion, les erreurs et la synchronisation des héros / attaques (`test/net.test.js`).
+Les tests (sans dépendance) vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio — synthèse de chaque preset, lecture des pas d'herbe dédiés, décodage des fichiers et repli synthèse avec un faux navigateur (`test/audio.test.js`), l'intégrité et la correspondance des sources de la banque de sons (`test/sfx-bank.test.js`), le moteur d'effets visuels, brins compris (`test/effects.test.js`), le monde plat — prairie unique, sol sans relief, déplacements sans chute (`test/world.test.js`), le rendu du ciel et du décor sur un contexte factice (`test/scenery.test.js`), l'herbe interactive — pose des touffes, courbure et retour au repos, froissements espacés, brins occasionnels (`test/grass.test.js`) — et vérifient la connexion automatique, la reconnexion, les erreurs et la synchronisation des héros / attaques (`test/net.test.js`). Le minage est couvert par `test/terrain.test.js` (couches, collisions, puits et tunnels de deux blocs), `test/mining.test.js` (clic maintenu, portée, roche-mère), `test/drops.test.js` (chute, attraction, ramassage), `test/inventory.test.js` (piles, défilement), `test/block-view.test.js` (rendu sur contexte factice et textures présentes) et `test/hotbar.test.js` (barre sur faux DOM).
 
 ## Sprites et décor
 

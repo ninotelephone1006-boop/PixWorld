@@ -12,10 +12,12 @@
  * Tout est accompagné d'effets sonores synthétisés (src/audio.js) et
  * d'effets visuels (src/effects.js).
  *
- * Le monde est procédural (src/world.js) : relief, plateformes et quatre
- * biomes (prairie, dunes, taïga gelée, terres de cendre) se déduisent d'une
- * graine commune à tous les joueurs. Le rendu des biomes est dans
- * src/scenery.js.
+ * Le monde est une prairie plate (src/world.js) dont le sol est fait de blocs
+ * (src/terrain.js) : une couche d'herbe, quatre de terre, dix de pierre. Tenir
+ * le clic gauche sur un bloc à portée le mine en deux secondes (src/mining.js) ;
+ * il laisse un objet à ramasser, rangé dans la barre d'inventaire à droite de
+ * l'écran (src/inventory.js, src/hotbar.js). Le rendu des blocs est dans
+ * src/block-view.js, celui du décor dans src/scenery.js.
  *
  * Tous les joueurs rejoignent le serveur WebSocket du site : voir src/net.js.
  */
@@ -25,6 +27,8 @@
   const canvas = document.querySelector("#world");
   const ctx = canvas.getContext("2d");
   const keys = new Set();
+  // Souris : position dans le canevas, présence sur le jeu, clic gauche enfoncé.
+  const mouse = { x: 0, y: 0, inside: false, down: false };
 
   const gameMenu = document.querySelector("#game-menu");
   const menuForm = document.querySelector("#menu-form");
@@ -58,6 +62,9 @@
   const playersRename = document.querySelector("#players-rename");
   const soundToggle = document.querySelector("#sound-toggle");
   const toasts = document.querySelector("#toasts");
+  const hotbarWrap = document.querySelector("#hotbar-wrap");
+  const hotbarList = document.querySelector("#hotbar");
+  const hotbarName = document.querySelector("#hotbar-name");
 
   const audio = window.PixWorldAudio;
   const fx = window.PixWorldEffects.create();
@@ -66,11 +73,13 @@
   const grass = window.PixWorldGrass.create({
     onRustle: handleGrassRustle,
     onBlades: handleGrassBlades,
+    canTouch: (tile) => tuftVisible(tile),
   });
 
   const STORAGE_NAME = "pixworld.name";
   const STORAGE_CHARACTER = "pixworld.character";
   const FONT_STACK = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
+  const GRAVITY = 1900; // accélération de la chute, px/s²
 
   // Points de vie : barre au-dessus de chaque joueur, dégâts des attaques.
   const MAX_HP = 100;
@@ -82,6 +91,7 @@
   const FLASH_DURATION = 0.09; // silhouette blanche après un coup
   const LOW_HP = 35; // en dessous : vignette rouge et battements de cœur
   const COMBO_FINISHER_BONUS = 5; // la 3e coupe de Raiden frappe plus fort
+  const WHEEL_STEP = 60; // delta de molette (px) pour changer d'emplacement d'un cran
 
   // ─────────────────────────── Sprites et décor ───────────────────────────
   // Chaque héros possède sa feuille complète : les ninjas CC0 pour Kage et
@@ -105,9 +115,9 @@
   const tileSize = 16;
   const tileScale = 4;
   const tileDraw = tileSize * tileScale;
-  const groundHeight = tileDraw * 2;
-  // Herbes du premier plan (défilement plus rapide que le sol).
-  const foregroundFactor = 1.3;
+  // Terrain en blocs (src/terrain.js) : deux blocs font la hauteur du héros.
+  const BLOCK = window.PixWorldTerrain.BLOCK;
+  const TERRAIN_DEPTH = window.PixWorldTerrain.DEPTH;
   // Tuiles de la feuille : touffes d'herbe de la prairie.
   const tuftTiles = [
     [16, 115],
@@ -134,15 +144,43 @@
     images: { sky: skyLayer, hills: hillsLayer },
   });
   const STEP_HEIGHT = window.PixWorldWorld.constants.STEP;
-  const BIOME_MATERIAL = { prairie: "grass", desert: "dirt", snow: "snow", volcano: "stone" };
   const SEND_INTERVAL = 0.05; // 20 envois de position par seconde
   const SPAWN_X = 112;
+
+  // Le sol est fait de blocs (src/terrain.js) ; seuls les blocs minés sont stockés.
+  const terrain = window.PixWorldTerrain.create({ width: WORLD_WIDTH });
+  const blockView = window.PixWorldBlockView.create({ terrain });
+  const inventory = window.PixWorldInventory.create();
+  const drops = window.PixWorldDrops.create({ terrain });
+  const miner = window.PixWorldMining.create({
+    terrain,
+    onBreak: handleBlockBroken,
+    onHit: handleBlockHit,
+  });
+  const hotbar = window.PixWorldHotbar.create({
+    root: hotbarList,
+    wrap: hotbarWrap,
+    label: hotbarName,
+    onSelect: selectSlot,
+  });
+  // Mêmes noms de matière pour les pas et les particules.
+  const STEP_OF_BLOCK = { grass: "grass", dirt: "dirt", stone: "stone", bedrock: "stone" };
+  const BLOCK_COLORS = {
+    grass: ["#6ccf45", "#5fbf3a", "#7a4a2b", "#8c5734"],
+    dirt: ["#7a4a2b", "#8c5734", "#6b3f24", "#a86d43"],
+    stone: ["#9a9ea6", "#7d828a", "#c4c8ce", "#b0b5bd"],
+    bedrock: ["#2f2f36", "#44444e", "#1c1c22"],
+  };
+  let lastFullNotice = -Infinity; // dernier avertissement « inventaire plein »
 
   const player = {
     x: SPAWN_X,
     y: 0,
+    // Profondeur des pieds sous la surface : 0 posé sur le sol, négatif en l'air,
+    // positif dans un trou. La hauteur du héros vaut deux blocs.
+    feet: 0,
     width: 42,
-    height: 60,
+    height: BLOCK * 2,
     velocityX: 0,
     velocityY: 0,
     knockback: 0,
@@ -226,6 +264,53 @@
     return x + player.width / 2;
   }
 
+  // ─────────────────────────── Terrain en blocs ───────────────────────────
+  /**
+   * Ligne de la surface à l'écran. Le sol en blocs (480 px de profondeur) reste
+   * visible en entier dès que la fenêtre le permet. Sur une fenêtre basse, la
+   * surface ne descend pas sous 30 % de la hauteur, pour que le héros reste
+   * sous la barre de commandes ; le fond du monde déborde alors un peu.
+   */
+  function surfaceY(viewHeight) {
+    return Math.round(clamp(viewHeight - TERRAIN_DEPTH, viewHeight * 0.3, viewHeight * 0.5));
+  }
+
+  /** Boîte de collision du héros, en profondeur. */
+  function playerBox() {
+    return { x: player.x, feet: player.feet, width: player.width, height: player.height };
+  }
+
+  /** Recalcule la position à l'écran à partir de la profondeur des pieds. */
+  function syncPlayerY() {
+    player.y = groundY + player.feet - player.height;
+  }
+
+  /** Déplace le héros dans le terrain, avec collisions. Renvoie le résultat (hitX, hitY, landed…). */
+  function moveBody(dx, dy) {
+    const result = terrain.move(playerBox(), dx, dy);
+    player.x = result.x;
+    player.feet = result.feet;
+    return result;
+  }
+
+  /** Matière des pas sous des pieds à la profondeur `feet`, pour src/audio.js. */
+  function materialUnder(worldX, feet) {
+    const type = terrain.typeAt(Math.floor(worldX / BLOCK), Math.floor((feet + 1) / BLOCK));
+    return STEP_OF_BLOCK[type] || "dirt";
+  }
+
+  /** Une touffe pousse sur l'herbe : si son bloc de surface a été miné, elle disparaît. */
+  function tuftVisible(tile) {
+    const tuft = window.PixWorldGrass.tuftFor(tile);
+    if (!tuft) return false;
+    const first = Math.floor(tuft.x0 / BLOCK);
+    const last = Math.floor((tuft.x1 - 0.01) / BLOCK);
+    for (let col = first; col <= last; col++) {
+      if (terrain.typeAt(col, 0) !== "grass") return false;
+    }
+    return true;
+  }
+
   /** Nettoie un pseudo venu du réseau ou du champ de saisie. */
   function cleanName(raw) {
     const text = String(raw == null ? "" : raw)
@@ -248,12 +333,6 @@
   /** Couleur d'identification dans l'interface : l'accent du héros choisi. */
   function accentFor(id) {
     return characterFor(id).accent;
-  }
-
-  // Petit hash déterministe pour varier terre et herbe sans aléatoire.
-  function hash(n) {
-    const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
-    return x - Math.floor(x);
   }
 
   /** Centre horizontal (monde) et vertical d'un joueur, pour les effets. */
@@ -517,6 +596,9 @@
     playing = false;
     player.velocityX = 0;
     keys.clear();
+    mouse.down = false;
+    miner.reset();
+    hotbar.show(false);
     syncMenuFromIdentity();
     gameMenu.dataset.mode = menuMode;
     menuClose.hidden = menuMode !== "pause";
@@ -553,6 +635,8 @@
   function hideMenu() {
     gameMenu.hidden = true;
     gameMenu.classList.remove("is-opening");
+    // La barre d'inventaire ne réapparaît qu'une fois la partie reprise.
+    hotbar.show(true);
   }
 
   function applyMenuSelection() {
@@ -608,7 +692,8 @@
     myId = null;
     hasJoined = false;
     player.x = SPAWN_X;
-    player.y = groundAt(centerOf(player.x)) - player.height;
+    player.feet = 0;
+    syncPlayerY();
     player.velocityX = 0;
     player.velocityY = 0;
     player.knockback = 0;
@@ -787,7 +872,8 @@
     }
     const wasGrounded = peer.g;
     peer.x = clamp(Number(state.x) || 0, 0, WORLD_WIDTH - player.width);
-    peer.gap = Math.max(0, Number(state.gap) || 0);
+    // gap négatif : le joueur distant a creusé sous la surface.
+    peer.gap = clamp(Number(state.gap) || 0, -TERRAIN_DEPTH, 4000);
     peer.f = Number(state.f) >= 0 ? 1 : -1;
     peer.vx = Number(state.vx) || 0;
     peer.vy = Number(state.vy) || 0;
@@ -808,7 +894,7 @@
       if (wasGrounded && !peer.g && peer.vy < -100) sfxAt("jump", center.x, { volume: 0.5 });
       if (!wasGrounded && peer.g) {
         sfxAt("land", center.x, { volume: 0.6 });
-        fx.dust(center.x, groundAt(center.x), { count: 5 });
+        fx.dust(center.x, groundY + Math.max(0, -peer.gap), { count: 5 });
       }
     }
 
@@ -944,6 +1030,125 @@
     fx.blades(event.x, groundAt(event.x) - 24, { count: 2 + Math.floor(Math.random() * 3), direction: event.dir });
   }
 
+  // ─────────────────────────── Minage et inventaire ───────────────────────────
+  /** Case de bloc survolée par la souris (null hors du jeu, hors du terrain ou dans l'air). */
+  function hoveredCell() {
+    if (!playing || !mouse.inside || player.deadTime > 0) return null;
+    const cell = terrain.cellAt(mouse.x + camX, mouse.y - groundY);
+    return terrain.typeAt(cell.col, cell.row) ? cell : null;
+  }
+
+  /** Minage : la case visée, le clic maintenu et la portée du héros. */
+  function updateMining(delta) {
+    const alive = playing && player.deadTime === 0;
+    miner.setHover(hoveredCell());
+    miner.setHolding(mouse.down && alive);
+    const state = miner.update(delta, {
+      x: player.x + player.width / 2,
+      y: player.feet - player.height / 2,
+      enabled: alive,
+    });
+    // Sans direction tenue au clavier, le héros se tourne vers le bloc qu'il mine.
+    if (miner.holding && state.col !== null && !isLeftPressed() && !isRightPressed()) {
+      const dx = (state.col + 0.5) * BLOCK - (player.x + player.width / 2);
+      if (Math.abs(dx) > 6) player.facing = dx > 0 ? 1 : -1;
+    }
+  }
+
+  /** Objets lâchés : physique, puis ramassage au contact (si l'inventaire peut les accueillir). */
+  function updateDrops(delta) {
+    const alive = playing && player.deadTime === 0;
+    drops.update(delta, alive ? playerBox() : null);
+    if (!alive) return;
+    let refused = false;
+    const taken = drops.collect(playerBox(), (type) => {
+      const left = inventory.add(type, 1);
+      if (left > 0) refused = true;
+      return left === 0;
+    });
+    if (taken.length) {
+      const counts = {};
+      taken.forEach((type) => {
+        counts[type] = (counts[type] || 0) + 1;
+      });
+      const me = playerCenter();
+      Object.keys(counts).forEach((type, index) => {
+        const name = window.PixWorldHotbar.NAMES[type] || type;
+        fx.text(me.x, player.y - 14 - index * 16, "+" + counts[type] + " " + name, { color: "#fff6dc", size: 13, duration: 1.1 });
+      });
+      sfx("itemPickup", { volume: 0.7 });
+      hotbar.render(inventory);
+    }
+    if (refused && performance.now() - lastFullNotice > 2500) {
+      lastFullNotice = performance.now();
+      toast("Inventaire plein", true);
+      sfx("uiError", { volume: 0.5 });
+    }
+  }
+
+  /** Change d'emplacement : molette, touches 1 à 9 ou clic sur la barre. */
+  function selectSlot(index) {
+    const before = inventory.selected;
+    inventory.select(index);
+    hotbar.render(inventory);
+    hotbar.showName(inventory);
+    if (inventory.selected !== before) sfx("uiHover", { volume: 0.5 });
+  }
+
+  /** Un bloc vient de se briser : il laisse son objet, des éclats et un bruit sec. */
+  function handleBlockBroken(event) {
+    const cx = (event.col + 0.5) * BLOCK;
+    const cy = (event.row + 0.5) * BLOCK;
+    drops.spawn(event.type, cx, cy);
+    fx.burst(cx, groundY + cy, {
+      count: 14,
+      colors: BLOCK_COLORS[event.type] || BLOCK_COLORS.dirt,
+      minSize: 2,
+      maxSize: 4.5,
+      minSpeed: 70,
+      maxSpeed: 230,
+      lift: 90,
+      gravity: 700,
+    });
+    sfxAt("blockBreak", cx, { volume: 0.9 });
+    fx.shake(1.5, 0.08);
+  }
+
+  /** Coup de pioche pendant le minage : bruit de la matière et quelques éclats. */
+  function handleBlockHit(event) {
+    const cx = (event.col + 0.5) * BLOCK;
+    const cy = (event.row + 0.5) * BLOCK;
+    sfxAt("step", cx, { material: STEP_OF_BLOCK[event.type] || "dirt", volume: 0.5, pitch: 1.4 });
+    fx.burst(cx, groundY + cy, {
+      count: 3,
+      colors: BLOCK_COLORS[event.type] || BLOCK_COLORS.dirt,
+      minSize: 1.5,
+      maxSize: 3,
+      minSpeed: 40,
+      maxSpeed: 120,
+      lift: 40,
+      gravity: 500,
+    });
+  }
+
+  /** Contour de la case visée (rouge si hors de portée ou incassable) et fissures pendant le minage. */
+  function drawMiningTarget() {
+    const state = miner.state;
+    if (state.col === null) return;
+    const valid = state.inReach && state.breakable;
+    const target = { col: state.col, row: state.row, camX, top: groundY };
+    blockView.drawOutline(ctx, Object.assign({ valid }, target));
+    if (valid) blockView.drawCrack(ctx, Object.assign({ progress: state.progress }, target));
+  }
+
+  /** Met à jour la position de la souris dans le canevas, et si elle survole le jeu (pas la barre ni les menus). */
+  function updateMouse(event) {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = event.clientX - rect.left;
+    mouse.y = event.clientY - rect.top;
+    mouse.inside = event.target === canvas;
+  }
+
   // ─────────────────────────── Boucle de jeu ───────────────────────────
   function resize() {
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -954,9 +1159,10 @@
     canvas.height = Math.round(height * ratio);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    groundY = Math.max(0, height - groundHeight);
+    groundY = surfaceY(height);
     player.x = clamp(player.x, 0, WORLD_WIDTH - player.width);
-    if (player.grounded) player.y = groundAt(centerOf(player.x)) - player.height;
+    // La profondeur des pieds ne change pas : le héros reste dans son trou ou sur le sol.
+    syncPlayerY();
     draw();
   }
 
@@ -1047,7 +1253,8 @@
     player.hp = MAX_HP;
     player.deadTime = 0;
     player.x = SPAWN_X;
-    player.y = groundAt(centerOf(player.x)) - player.height;
+    player.feet = 0;
+    syncPlayerY();
     player.velocityX = 0;
     player.velocityY = 0;
     player.knockback = 0;
@@ -1183,6 +1390,8 @@
 
     updateOthers(delta);
     grass.update(delta, grassWalkers());
+    updateMining(delta);
+    updateDrops(delta);
     scenery.updateAmbient(delta, width, height, world.biomeAt(camX + width / 2).id);
     updateProjectiles(delta);
     checkMeleeHits();
@@ -1273,20 +1482,25 @@
     player.knockback *= Math.max(0, 1 - delta * 6);
     if (Math.abs(player.knockback) < 4) player.knockback = 0;
     player.velocityX = player.knockback;
-    player.x = clamp(player.x + player.velocityX * delta, 0, WORLD_WIDTH - player.width);
+    if (moveBody(player.velocityX * delta, 0).hitX) player.knockback = 0;
+    player.x = clamp(player.x, 0, WORLD_WIDTH - player.width);
     if (!player.grounded) {
-      const feetBefore = player.y + player.height;
-      player.velocityY += 1900 * delta;
-      player.y += player.velocityY * delta;
-      const top = world.landingTop(centerOf(player.x), feetBefore, player.y + player.height, groundY);
-      if (top !== null && player.velocityY >= 0) {
-        player.y = top - player.height;
+      player.velocityY += GRAVITY * delta;
+      const fall = moveBody(0, player.velocityY * delta);
+      if (fall.landed) {
         player.velocityY = 0;
         player.grounded = true;
-        fx.dust(centerOf(player.x), top, { count: 8 });
+        fx.dust(centerOf(player.x), groundY + player.feet, { count: 8 });
         sfx("land", { volume: 0.6, pitch: 0.85 });
+      } else if (fall.hitY) {
+        player.velocityY = 0;
       }
+    } else if (!terrain.isSupported(playerBox())) {
+      // Le bloc sous le corps a été miné : il tombe dans le trou.
+      player.grounded = false;
+      player.velocityY = 0;
     }
+    syncPlayerY();
   }
 
   function updateLocalMovement(delta) {
@@ -1298,7 +1512,11 @@
     if (Math.abs(player.knockback) < 4) player.knockback = 0;
     player.velocityX = walk + player.knockback;
     if (direction !== 0 && !stunned) player.facing = direction;
-    player.x += player.velocityX * delta;
+    // Contre le terrain : un bloc arrête le héros et annule son élan.
+    if (moveBody(player.velocityX * delta, 0).hitX) {
+      player.velocityX = 0;
+      player.knockback = 0;
+    }
     player.x = clamp(player.x, 0, WORLD_WIDTH - player.width);
 
     // Caméra qui suit le joueur, bornée au monde : parallaxe du décor.
@@ -1306,39 +1524,32 @@
     camX += (target - camX) * Math.min(1, delta * 10);
 
     const cx = centerOf(player.x);
-    const feetBefore = player.y + player.height;
     if (!player.grounded) {
       player.airTime += delta;
-      player.velocityY += 1900 * delta;
-      player.y += player.velocityY * delta;
-
-      // Atterrissage sur le relief ou sur une plateforme traversée par le haut.
-      const top = world.landingTop(cx, feetBefore, player.y + player.height, groundY);
-      if (top !== null && player.velocityY >= 0) {
-        player.y = top - player.height;
+      player.velocityY += GRAVITY * delta;
+      const fall = moveBody(0, player.velocityY * delta);
+      if (fall.landed) {
+        // Atterrissage : on se pose sur la face supérieure du bloc touché.
         const impact = player.velocityY;
         player.velocityY = 0;
         player.grounded = true;
         player.landingTime = 0.12;
         const me = playerCenter();
         const heavy = impact > 900;
-        fx.dust(me.x, top, { count: heavy ? 10 : 6 });
+        fx.dust(me.x, groundY + player.feet, { count: heavy ? 10 : 6 });
         sfx("land", { volume: heavy ? 1 : 0.7, pitch: heavy ? 0.9 : 1 });
         if (heavy) fx.shake(2, 0.1);
         player.airTime = 0;
+      } else if (fall.hitY) {
+        player.velocityY = 0; // plafond : la tête a heurté un bloc
       }
-    } else {
-      // Au sol : on suit le relief (montées et descentes douces) ; si la
-      // surface se dérobe, le personnage tombe.
-      const top = world.supportTop(cx, feetBefore, groundY);
-      if (top === null) {
-        player.grounded = false;
-        player.velocityY = 0;
-        player.airTime = 0;
-      } else {
-        player.y = top - player.height;
-      }
+    } else if (!terrain.isSupported(playerBox())) {
+      // Le bloc sous les pieds a été miné : le personnage tombe.
+      player.grounded = false;
+      player.velocityY = 0;
+      player.airTime = 0;
     }
+    syncPlayerY();
 
     if (player.grounded && Math.abs(walk) > 0.5) {
       // Bruits de pas réguliers et petits nuages de poussière.
@@ -1347,9 +1558,9 @@
         player.stepTimer = 0.24;
         player.stepCount++;
         // Les pas sont générés en code : une variante différente à chaque fois.
-        sfx("step", { volume: 0.8, material: stepMaterialAt(cx) });
+        sfx("step", { volume: 0.8, material: materialUnder(cx, player.feet) });
         if (player.stepCount % 2 === 0) {
-          fx.dust(cx - player.facing * 10, groundAt(cx), { count: 2, direction: player.facing });
+          fx.dust(cx - player.facing * 10, groundY + player.feet, { count: 2, direction: player.facing });
         }
       }
     } else if (player.grounded) {
@@ -1364,11 +1575,6 @@
       currentBiome = biome.id;
       toast(biome.name + " · " + biome.blurb, false);
     }
-  }
-
-  /** Matière des pas selon le biome sous le personnage. */
-  function stepMaterialAt(x) {
-    return BIOME_MATERIAL[world.biomeAt(x).id] || "grass";
   }
 
   /** Interpole les joueurs distants pour lisser les 20 messages/seconde. */
@@ -1409,7 +1615,7 @@
         peer.stepTimer -= delta;
         if (peer.stepTimer <= 0) {
           peer.stepTimer = 0.24;
-          sfxAt("step", center.x, { volume: 0.5, material: stepMaterialAt(center.x) });
+          sfxAt("step", center.x, { volume: 0.5, material: materialUnder(center.x, -peer.gap) });
         }
       }
     });
@@ -2018,7 +2224,7 @@
       // Ombre au sol, comme pour le joueur local.
       ctx.fillStyle = "rgba(23, 59, 91, 0.16)";
       ctx.beginPath();
-      ctx.ellipse(centerX, groundAt(peer.rx + player.width / 2) + 7, player.width * (peer.g ? 0.58 : 0.42), 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(centerX, groundY + Math.max(0, -peer.gap) + 7, player.width * (peer.g ? 0.58 : 0.42), 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
       if (centerX < -spriteDrawSize || centerX > width + spriteDrawSize) {
@@ -2082,26 +2288,7 @@
       const x = startX + c * tileDraw;
       if (world.biomeAt(worldTile * tileDraw + tileDraw / 2).id !== "prairie") continue;
       const tuft = window.PixWorldGrass.tuftFor(worldTile);
-      if (tuft) drawGroundTuft(tuft, x);
-    }
-  }
-
-  // Herbes au premier plan de la prairie, défilant plus vite que le sol :
-  // renforce l'effet de profondeur de la parallaxe.
-  function drawForeground() {
-    if (!(tileset.complete && tileset.naturalWidth > 0)) return;
-    const blend = world.blendAt(camX + width / 2);
-    if (blend.from !== "prairie" || blend.to !== "prairie") return;
-    const scroll = camX * foregroundFactor;
-    const firstTile = Math.floor(scroll / tuftW) - 1;
-    const startX = -(scroll % tuftW) - tuftW;
-
-    for (let c = 0; startX + c * tuftW < width + tuftW; c++) {
-      const worldTile = firstTile + c;
-      if (hash(worldTile + 555) < 0.45) {
-        const tuft = tuftTiles[Math.floor(hash(worldTile + 313) * tuftTiles.length)];
-        ctx.drawImage(tileset, tuft[0], tuft[1], tileSize, 13, startX + c * tuftW, height - tuftH + 8, tuftW, tuftH);
-      }
+      if (tuft && tuftVisible(worldTile)) drawGroundTuft(tuft, x);
     }
   }
 
@@ -2112,15 +2299,19 @@
     ctx.save();
     ctx.translate(Math.round(fx.shakeX), Math.round(fx.shakeY));
 
-    // Décor des biomes : ciel, lointains, relief, puis props et plateformes.
+    // Ciel et lointains, puis le sol en blocs : fond de grotte, blocs, herbes
+    // de surface, objets lâchés et contour du bloc visé.
     const view = { width, height, camX, baseY: groundY, time: lastTime / 1000 };
     scenery.ensurePatterns(ctx);
     scenery.drawSky(ctx, width, height, camX, view.time);
     scenery.drawFarLayers(ctx, width, height, camX);
-    scenery.drawTerrain(ctx, view);
+    blockView.drawBackdrop(ctx, { width, height, top: groundY });
+    blockView.drawBlocks(ctx, { camX, top: groundY, width, height });
     drawTufts();
     scenery.drawProps(ctx, view);
     scenery.drawPlatforms(ctx, view);
+    blockView.drawDrops(ctx, { items: drops.list, camX, top: groundY, width });
+    drawMiningTarget();
 
     drawOthers();
 
@@ -2130,7 +2321,7 @@
     ctx.beginPath();
     ctx.ellipse(
       meX - camX,
-      groundAt(meX) + 7,
+      groundY + Math.max(0, player.feet) + 7,
       player.width * (player.grounded ? 0.58 : 0.42),
       5,
       0,
@@ -2152,7 +2343,6 @@
     drawProjectiles();
     fx.draw(ctx, camX);
 
-    drawForeground();
     scenery.drawAmbient(ctx);
     ctx.restore();
 
@@ -2215,6 +2405,12 @@
     }
     if (!playing) return;
 
+    // Touches 1 à 9 : choisir directement un emplacement de la barre.
+    if (/^Digit[1-9]$/.test(event.code)) {
+      selectSlot(Number(event.code.slice(5)) - 1);
+      return;
+    }
+
     const controlCode = [
       "KeyQ",
       "KeyA",
@@ -2247,20 +2443,46 @@
     keys.delete(event.code);
     keys.delete(event.key.toLowerCase());
   });
-  window.addEventListener("blur", () => keys.clear());
+  window.addEventListener("blur", () => {
+    keys.clear();
+    mouse.down = false;
+  });
 
-  // Clic gauche : attaque dans la direction du curseur.
+  // Clic gauche maintenu sur le jeu : miner le bloc visé (la souris le désigne).
   window.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !playing || event.target !== canvas) return;
     event.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
-    const playerScreenX = player.x + player.width / 2 - camX;
-    if (Math.abs(clickX - playerScreenX) > 4 && player.deadTime === 0) {
-      player.facing = clickX > playerScreenX ? 1 : -1;
-    }
-    startAttack();
+    updateMouse(event);
+    mouse.down = true;
   });
+  window.addEventListener("pointermove", updateMouse);
+  window.addEventListener("pointerup", (event) => {
+    if (event.button === 0) mouse.down = false;
+  });
+  window.addEventListener("pointercancel", () => {
+    mouse.down = false;
+  });
+  document.documentElement.addEventListener("mouseleave", () => {
+    mouse.inside = false;
+  });
+
+  // Molette : un cran fait passer à l'emplacement suivant ou précédent de la barre.
+  let wheelAccumulator = 0;
+  window.addEventListener(
+    "wheel",
+    (event) => {
+      if (!playing || event.ctrlKey) return; // Ctrl + molette reste le zoom du navigateur
+      event.preventDefault();
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 300 : 1;
+      wheelAccumulator += event.deltaY * unit;
+      while (Math.abs(wheelAccumulator) >= WHEEL_STEP) {
+        const direction = wheelAccumulator > 0 ? 1 : -1;
+        wheelAccumulator -= direction * WHEEL_STEP;
+        selectSlot(inventory.selected + direction);
+      }
+    },
+    { passive: false },
+  );
 
   window.addEventListener("resize", resize);
 
@@ -2276,6 +2498,7 @@
 
   buildCharacterCards();
   updateSoundButtons();
+  hotbar.render(inventory);
   resize();
   connect();
   openMenu("start");

@@ -37,7 +37,7 @@ Le ninja original provient de [OpenGameArt — Ninja Animated](https://opengamea
 - **Fichiers :** `background/sky-back.png` (ciel et nuages), `background/hills-middle.png` (collines), `background/tileset.png` (sol en tuiles et touffes d'herbe).
 - **Créateur :** Luis Zuno, alias [Ansimuz](https://ansimuz.com), pack « Sunny Land » (2017).
 - **Source GitHub :** récupéré depuis [gnaigsolo/thelostfox](https://github.com/gnaigsolo/thelostfox) et [Kevin1321/DA_Module_12_SunnyLand](https://github.com/Kevin1321/DA_Module_12_SunnyLand), dépôts qui redistribuent le pack gratuit de l'auteur.
-- **Utilisation :** ciel lent, collines moyennes, sol et herbes de premier plan défilent à différentes vitesses.
+- **Utilisation :** ciel lent et collines moyennes, en parallaxe ; les touffes d'herbe de la surface sont découpées dans `tileset.png`.
 
 ## Menu
 
@@ -47,3 +47,11 @@ Le menu n'embarque pas de texture externe : ses panneaux, grilles, lueurs, annea
 
 - **Aucune image tierce ajoutée.** Les textures de sol (corps de terre, sable, neige, basalte), les ciels, les silhouettes lointaines, les arbres, cactus, pins, roches, cristaux et mares de lave sont dessinés en code par `src/scenery.js` ; le relief, les plateformes et la disposition du décor viennent de `src/world.js`.
 - La prairie conserve les fichiers « Sunny Land » décrits plus haut.
+
+## Blocs du terrain — textures pixel art (CC BY 4.0)
+
+- **Fichiers :** `assets/blocks/grass.png` (herbe), `assets/blocks/dirt.png` (terre), `assets/blocks/stone.png` (pierre) et `assets/blocks/bedrock.png` (roche-mère). Ce sont des images de 16 × 16 px reprises sans modification ; le jeu les affiche à 30 px avec des pixels nets.
+- **Correspondance :** `earth_loam_grassy_sides.png` → `grass.png` ; `earth_loam.png` → `dirt.png` ; `concrete_plain.png` → `stone.png` ; `asphalt_plain.png` → `bedrock.png`.
+- **Auteur :** Malcolm Riley, compte GitHub [malcolmriley](https://github.com/malcolmriley).
+- **Source GitHub :** [malcolmriley/unused-textures](https://github.com/malcolmriley/unused-textures), dossier `blocks/`, commit `9218cb8997bf1dc83617bd7748acf44a16c19c42`.
+- **Licence :** [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/). Crédit obligatoire, fourni par ce paragraphe. Ces textures ont été créées pour des mods Minecraft ; le projet n'utilise aucune ressource officielle de Minecraft.

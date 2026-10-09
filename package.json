@@ -7,7 +7,7 @@
     "start": "node server/server.js",
     "dev": "node server/server.js",
     "build:sfx": "node tools/build-sfx.mjs",
-    "test": "node test/characters.test.js && node test/audio.test.js && node test/sfx-bank.test.js && node test/effects.test.js && node test/net.test.js && node test/grass.test.js && node test/world.test.js && node test/scenery.test.js && node test/server.test.js"
+    "test": "node test/characters.test.js && node test/audio.test.js && node test/sfx-bank.test.js && node test/effects.test.js && node test/net.test.js && node test/grass.test.js && node test/world.test.js && node test/scenery.test.js && node test/terrain.test.js && node test/mining.test.js && node test/drops.test.js && node test/inventory.test.js && node test/block-view.test.js && node test/hotbar.test.js && node test/server.test.js"
   },
   "engines": {
     "node": ">=18"

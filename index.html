@@ -193,6 +193,124 @@
         user-select: none;
       }
 
+      /* ----- Barre de raccourcis de l'inventaire : au centre à droite ----- */
+
+      .hotbar-wrap {
+        --slot: clamp(38px, 5.4vh, 50px);
+        position: absolute;
+        top: 50%;
+        right: clamp(14px, 3vw, 30px);
+        transform: translateY(-50%);
+        z-index: 2;
+      }
+
+      .hotbar-wrap[hidden] {
+        display: none;
+      }
+
+      .hotbar {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        margin: 0;
+        padding: 7px;
+        border: 1px solid rgb(255 255 255 / 20%);
+        border-radius: 14px;
+        background: rgb(13 44 78 / 46%);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 12px 30px rgb(11 38 66 / 22%);
+        list-style: none;
+      }
+
+      .hotbar li {
+        display: block;
+      }
+
+      .hotbar-slot {
+        position: relative;
+        display: grid;
+        width: var(--slot);
+        height: var(--slot);
+        place-items: center;
+        padding: 0;
+        border: 2px solid rgb(255 255 255 / 16%);
+        border-radius: 9px;
+        background: rgb(4 14 28 / 52%);
+        color: #fff;
+        font: inherit;
+        cursor: pointer;
+        transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+      }
+
+      .hotbar-slot:hover {
+        border-color: rgb(255 255 255 / 42%);
+      }
+
+      .hotbar-slot:focus-visible {
+        outline: 2px solid #ffbf67;
+        outline-offset: 2px;
+      }
+
+      .hotbar-slot.is-selected {
+        border-color: #fff;
+        box-shadow: 0 0 0 2px rgb(255 255 255 / 26%), 0 0 16px rgb(255 255 255 / 30%);
+        transform: scale(1.07);
+      }
+
+      .hotbar-icon {
+        width: calc(var(--slot) * 0.6);
+        height: calc(var(--slot) * 0.6);
+        image-rendering: pixelated;
+        pointer-events: none;
+        user-select: none;
+      }
+
+      .hotbar-key {
+        position: absolute;
+        top: 3px;
+        left: 4px;
+        color: rgb(255 255 255 / 52%);
+        font-size: 9px;
+        font-weight: 800;
+        line-height: 1;
+      }
+
+      .hotbar-count {
+        position: absolute;
+        right: 4px;
+        bottom: 3px;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1;
+        text-shadow: 0 1px 0 #000, 1px 0 0 #000, 0 -1px 0 #000, -1px 0 0 #000;
+      }
+
+      /* Étiquette « Terre × 12 » à gauche de l'emplacement choisi. */
+      .hotbar-name {
+        position: absolute;
+        right: calc(100% + 12px);
+        top: var(--name-y, 50%);
+        margin: 0;
+        padding: 5px 11px;
+        border: 1px solid rgb(255 255 255 / 20%);
+        border-radius: 999px;
+        background: rgb(13 44 78 / 70%);
+        color: #fff;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.03em;
+        white-space: nowrap;
+        transform: translateY(-50%);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s ease;
+      }
+
+      .hotbar-name.is-visible {
+        opacity: 1;
+      }
+
       /* ----- Petite UI multijoueur : liste des joueurs connectés ----- */
 
       .players {
@@ -470,7 +588,8 @@
           <span class="control"><kbd>D</kbd> droite</span>
           <span class="control"><kbd class="space">ESPACE</kbd> sauter</span>
           <span class="control"><kbd>X</kbd> attaquer</span>
-          <span class="control"><kbd class="space">CLIC G</kbd> attaquer</span>
+          <span class="control"><kbd class="space">CLIC G</kbd> miner</span>
+          <span class="control"><kbd class="space">MOLETTE</kbd> bloc</span>
           <span class="control"><kbd>ESC</kbd> menu</span>
           <button class="sound-toggle" id="sound-toggle" type="button" title="Couper le son (M)" aria-label="Couper le son (M)" aria-pressed="false">🔊</button>
         </div>
@@ -485,9 +604,14 @@
         <ul class="players-list" id="players-list"></ul>
       </aside>
 
+      <div class="hotbar-wrap" id="hotbar-wrap" hidden>
+        <p class="hotbar-name" id="hotbar-name" aria-hidden="true"></p>
+        <ol class="hotbar" id="hotbar" aria-label="Barre de raccourcis : blocs minés. Molette ou touches 1 à 9 pour choisir."></ol>
+      </div>
+
       <div class="toasts" id="toasts" aria-live="polite"></div>
 
-      <p class="hint">ESPACE SAUTE · X ATTAQUE · ÉCHAP MENU</p>
+      <p class="hint">ESPACE SAUTE · X ATTAQUE · CLIC G MINER · MOLETTE CHOISIR · ÉCHAP MENU</p>
 
       <section class="game-menu" id="game-menu" role="dialog" aria-modal="true" aria-labelledby="menu-title">
         <form class="menu-shell" id="menu-form" autocomplete="off">
@@ -599,6 +723,12 @@
     <script src="src/grass.js"></script>
     <script src="src/world.js"></script>
     <script src="src/scenery.js"></script>
+    <script src="src/terrain.js"></script>
+    <script src="src/mining.js"></script>
+    <script src="src/drops.js"></script>
+    <script src="src/inventory.js"></script>
+    <script src="src/block-view.js"></script>
+    <script src="src/hotbar.js"></script>
     <script src="src/game.js"></script>
   </body>
 </html>

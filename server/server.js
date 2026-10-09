@@ -265,7 +265,8 @@ function handleMessage(player, message) {
   if (message.t === "state") {
     player.state = {
       x: Math.round(clampNumber(message.x, 0, WORLD_WIDTH, player.state.x)),
-      gap: Math.round(clampNumber(message.gap, 0, 4000, 0)),
+      // Négatif : le héros est creusé sous la surface (minage) ; positif : en l'air.
+      gap: Math.round(clampNumber(message.gap, -1000, 4000, 0)),
       f: Number(message.f) < 0 ? -1 : 1,
       vx: Math.round(clampNumber(message.vx, -4000, 4000, 0)),
       vy: Math.round(clampNumber(message.vy, -4000, 4000, 0)),
