@@ -6,9 +6,9 @@
  * disponibles dans assets/sfx/ et le gain à leur appliquer.
  *
  * Provenance : dépôt Daarko/sparkstream-sounds (extraits des packs Kenney, CC0 1.0).
- * Les pas (« step ») sont absents de cette liste : ils sont synthétisés en
- * code par src/audio.js. Quand un événement n'a pas de fichier (ou que le
- * navigateur n'a pas pu les charger), src/audio.js retombe sur la synthèse.
+ * Les pas d'herbe (« stepGrass ») ont des samples dédiés ; les autres
+ * matières et les événements non chargés gardent un secours synthétisé.
+ * Chaque événement conserve aussi ses noms de fichiers source pour audit.
  */
 window.PixWorldSfxLibrary = {
   "source": {
@@ -43,6 +43,13 @@ window.PixWorldSfxLibrary = {
         "uiHover-3.wav",
         "uiHover-4.wav",
         "uiHover-5.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/ui-audio-rollover1.wav",
+        "ui-clicks/ui-audio-rollover2.wav",
+        "ui-clicks/ui-audio-rollover3.wav",
+        "ui-clicks/ui-audio-rollover4.wav",
+        "ui-clicks/ui-audio-rollover5.wav"
       ]
     },
     "uiSelect": {
@@ -56,6 +63,16 @@ window.PixWorldSfxLibrary = {
         "uiSelect-6.wav",
         "uiSelect-7.wav",
         "uiSelect-8.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/ui-audio-click1.wav",
+        "ui-clicks/ui-audio-click2.wav",
+        "ui-clicks/ui-audio-click3.wav",
+        "ui-clicks/ui-audio-click4.wav",
+        "ui-clicks/interface-sounds-click_001.wav",
+        "ui-clicks/interface-sounds-click_002.wav",
+        "ui-clicks/interface-sounds-click_003.wav",
+        "ui-clicks/interface-sounds-click_004.wav"
       ]
     },
     "uiConfirm": {
@@ -65,6 +82,12 @@ window.PixWorldSfxLibrary = {
         "uiConfirm-2.wav",
         "uiConfirm-3.wav",
         "uiConfirm-4.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/interface-sounds-confirmation_001.wav",
+        "ui-clicks/interface-sounds-confirmation_002.wav",
+        "ui-clicks/interface-sounds-confirmation_003.wav",
+        "ui-clicks/interface-sounds-confirmation_004.wav"
       ]
     },
     "uiBack": {
@@ -74,6 +97,12 @@ window.PixWorldSfxLibrary = {
         "uiBack-2.wav",
         "uiBack-3.wav",
         "uiBack-4.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/interface-sounds-back_001.wav",
+        "ui-clicks/interface-sounds-back_002.wav",
+        "ui-clicks/interface-sounds-back_003.wav",
+        "ui-clicks/interface-sounds-back_004.wav"
       ]
     },
     "uiPause": {
@@ -83,6 +112,12 @@ window.PixWorldSfxLibrary = {
         "uiPause-2.wav",
         "uiPause-3.wav",
         "uiPause-4.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/interface-sounds-minimize_001.wav",
+        "ui-clicks/interface-sounds-minimize_002.wav",
+        "ui-clicks/interface-sounds-minimize_003.wav",
+        "ui-clicks/interface-sounds-minimize_004.wav"
       ]
     },
     "uiType": {
@@ -91,6 +126,11 @@ window.PixWorldSfxLibrary = {
         "uiType-1.wav",
         "uiType-2.wav",
         "uiType-3.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/interface-sounds-tick_001.wav",
+        "ui-clicks/interface-sounds-tick_002.wav",
+        "ui-clicks/interface-sounds-tick_004.wav"
       ]
     },
     "uiError": {
@@ -100,6 +140,12 @@ window.PixWorldSfxLibrary = {
         "uiError-2.wav",
         "uiError-3.wav",
         "uiError-4.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/interface-sounds-error_001.wav",
+        "ui-clicks/interface-sounds-error_002.wav",
+        "ui-clicks/interface-sounds-error_003.wav",
+        "ui-clicks/interface-sounds-error_004.wav"
       ]
     },
     "uiToggleOn": {
@@ -110,6 +156,13 @@ window.PixWorldSfxLibrary = {
         "uiToggleOn-3.wav",
         "uiToggleOn-4.wav",
         "uiToggleOn-5.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/ui-audio-switch1.wav",
+        "ui-clicks/ui-audio-switch2.wav",
+        "ui-clicks/ui-audio-switch3.wav",
+        "ui-clicks/ui-audio-switch4.wav",
+        "ui-clicks/ui-audio-switch5.wav"
       ]
     },
     "uiToggleOff": {
@@ -120,6 +173,13 @@ window.PixWorldSfxLibrary = {
         "uiToggleOff-3.wav",
         "uiToggleOff-4.wav",
         "uiToggleOff-5.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/ui-audio-switch6.wav",
+        "ui-clicks/ui-audio-switch7.wav",
+        "ui-clicks/ui-audio-switch8.wav",
+        "ui-clicks/ui-audio-switch9.wav",
+        "ui-clicks/ui-audio-switch10.wav"
       ]
     },
     "toast": {
@@ -130,6 +190,13 @@ window.PixWorldSfxLibrary = {
         "toast-3.wav",
         "toast-4.wav",
         "toast-5.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/interface-sounds-question_001.wav",
+        "ui-clicks/interface-sounds-question_002.wav",
+        "ui-clicks/interface-sounds-question_003.wav",
+        "ui-clicks/interface-sounds-pluck_001.wav",
+        "ui-clicks/interface-sounds-pluck_002.wav"
       ]
     },
     "jump": {
@@ -140,6 +207,13 @@ window.PixWorldSfxLibrary = {
         "jump-3.wav",
         "jump-4.wav",
         "jump-5.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/digital-audio-phaseJump1.wav",
+        "digital-beeps/digital-audio-phaseJump2.wav",
+        "digital-beeps/digital-audio-phaseJump3.wav",
+        "digital-beeps/digital-audio-phaseJump4.wav",
+        "digital-beeps/digital-audio-phaseJump5.wav"
       ]
     },
     "land": {
@@ -150,6 +224,30 @@ window.PixWorldSfxLibrary = {
         "land-3.wav",
         "land-4.wav",
         "land-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-impactSoft_medium_000.wav",
+        "impacts/impact-sounds-impactSoft_medium_001.wav",
+        "impacts/impact-sounds-impactSoft_medium_002.wav",
+        "impacts/impact-sounds-impactSoft_medium_003.wav",
+        "impacts/impact-sounds-impactSoft_medium_004.wav"
+      ]
+    },
+    "stepGrass": {
+      "gain": 0.5,
+      "files": [
+        "stepGrass-1.wav",
+        "stepGrass-2.wav",
+        "stepGrass-3.wav",
+        "stepGrass-4.wav",
+        "stepGrass-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-footstep_grass_000.wav",
+        "impacts/impact-sounds-footstep_grass_001.wav",
+        "impacts/impact-sounds-footstep_grass_002.wav",
+        "impacts/impact-sounds-footstep_grass_003.wav",
+        "impacts/impact-sounds-footstep_grass_004.wav"
       ]
     },
     "throwShuriken": {
@@ -160,6 +258,13 @@ window.PixWorldSfxLibrary = {
         "throwShuriken-3.wav",
         "throwShuriken-4.wav",
         "throwShuriken-5.wav"
+      ],
+      "sourceFiles": [
+        "rpg-quest/rpg-audio-knifeSlice.wav",
+        "rpg-quest/rpg-audio-knifeSlice2.wav",
+        "rpg-quest/rpg-audio-drawKnife1.wav",
+        "rpg-quest/rpg-audio-drawKnife2.wav",
+        "rpg-quest/rpg-audio-drawKnife3.wav"
       ]
     },
     "shurikenRing": {
@@ -170,6 +275,13 @@ window.PixWorldSfxLibrary = {
         "shurikenRing-3.wav",
         "shurikenRing-4.wav",
         "shurikenRing-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-impactTin_medium_000.wav",
+        "impacts/impact-sounds-impactTin_medium_001.wav",
+        "impacts/impact-sounds-impactTin_medium_002.wav",
+        "impacts/impact-sounds-impactTin_medium_003.wav",
+        "impacts/impact-sounds-impactTin_medium_004.wav"
       ]
     },
     "bowDraw": {
@@ -181,6 +293,14 @@ window.PixWorldSfxLibrary = {
         "bowDraw-4.wav",
         "bowDraw-5.wav",
         "bowDraw-6.wav"
+      ],
+      "sourceFiles": [
+        "rpg-quest/rpg-audio-creak1.wav",
+        "rpg-quest/rpg-audio-creak2.wav",
+        "rpg-quest/rpg-audio-creak3.wav",
+        "rpg-quest/rpg-audio-cloth1.wav",
+        "rpg-quest/rpg-audio-cloth2.wav",
+        "rpg-quest/rpg-audio-cloth3.wav"
       ]
     },
     "bowRelease": {
@@ -189,6 +309,11 @@ window.PixWorldSfxLibrary = {
         "bowRelease-1.wav",
         "bowRelease-2.wav",
         "bowRelease-3.wav"
+      ],
+      "sourceFiles": [
+        "rpg-quest/rpg-audio-knifeSlice.wav",
+        "rpg-quest/rpg-audio-knifeSlice2.wav",
+        "rpg-quest/rpg-audio-chop.wav"
       ]
     },
     "arrowSwish": {
@@ -197,6 +322,11 @@ window.PixWorldSfxLibrary = {
         "arrowSwish-1.wav",
         "arrowSwish-2.wav",
         "arrowSwish-3.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/digital-audio-zap1.wav",
+        "digital-beeps/digital-audio-zap2.wav",
+        "digital-beeps/digital-audio-zapTwoTone.wav"
       ]
     },
     "slash": {
@@ -208,6 +338,14 @@ window.PixWorldSfxLibrary = {
         "slash-4.wav",
         "slash-5.wav",
         "slash-6.wav"
+      ],
+      "sourceFiles": [
+        "rpg-quest/rpg-audio-knifeSlice.wav",
+        "rpg-quest/rpg-audio-knifeSlice2.wav",
+        "rpg-quest/rpg-audio-chop.wav",
+        "rpg-quest/rpg-audio-cloth1.wav",
+        "rpg-quest/rpg-audio-cloth2.wav",
+        "rpg-quest/rpg-audio-cloth3.wav"
       ]
     },
     "slashRing": {
@@ -218,6 +356,13 @@ window.PixWorldSfxLibrary = {
         "slashRing-3.wav",
         "slashRing-4.wav",
         "slashRing-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-impactPlate_light_000.wav",
+        "impacts/impact-sounds-impactPlate_light_001.wav",
+        "impacts/impact-sounds-impactPlate_light_002.wav",
+        "impacts/impact-sounds-impactPlate_light_003.wav",
+        "impacts/impact-sounds-impactPlate_light_004.wav"
       ]
     },
     "slashHeavy": {
@@ -228,6 +373,13 @@ window.PixWorldSfxLibrary = {
         "slashHeavy-3.wav",
         "slashHeavy-4.wav",
         "slashHeavy-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-impactMetal_heavy_000.wav",
+        "impacts/impact-sounds-impactMetal_heavy_001.wav",
+        "impacts/impact-sounds-impactMetal_heavy_002.wav",
+        "impacts/impact-sounds-impactMetal_heavy_003.wav",
+        "impacts/impact-sounds-impactMetal_heavy_004.wav"
       ]
     },
     "chargeOrb": {
@@ -238,21 +390,30 @@ window.PixWorldSfxLibrary = {
         "chargeOrb-3.wav",
         "chargeOrb-4.wav",
         "chargeOrb-5.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/digital-audio-powerUp1.wav",
+        "digital-beeps/digital-audio-powerUp2.wav",
+        "digital-beeps/digital-audio-powerUp3.wav",
+        "digital-beeps/digital-audio-powerUp4.wav",
+        "digital-beeps/digital-audio-powerUp5.wav"
       ]
     },
     "castOrb": {
-      "gain": 0.7,
+      "gain": 0.62,
       "files": [
         "castOrb-1.wav",
         "castOrb-2.wav",
         "castOrb-3.wav",
         "castOrb-4.wav",
-        "castOrb-5.wav",
-        "castOrb-6.wav",
-        "castOrb-7.wav",
-        "castOrb-8.wav",
-        "castOrb-9.wav",
-        "castOrb-10.wav"
+        "castOrb-5.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/sci-fi-sounds-thrusterFire_000.wav",
+        "digital-beeps/sci-fi-sounds-thrusterFire_001.wav",
+        "digital-beeps/sci-fi-sounds-thrusterFire_002.wav",
+        "digital-beeps/sci-fi-sounds-thrusterFire_003.wav",
+        "digital-beeps/sci-fi-sounds-thrusterFire_004.wav"
       ]
     },
     "hitShuriken": {
@@ -263,6 +424,13 @@ window.PixWorldSfxLibrary = {
         "hitShuriken-3.wav",
         "hitShuriken-4.wav",
         "hitShuriken-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-impactMetal_light_000.wav",
+        "impacts/impact-sounds-impactMetal_light_001.wav",
+        "impacts/impact-sounds-impactMetal_light_002.wav",
+        "impacts/impact-sounds-impactMetal_light_003.wav",
+        "impacts/impact-sounds-impactMetal_light_004.wav"
       ]
     },
     "hitArrow": {
@@ -273,6 +441,13 @@ window.PixWorldSfxLibrary = {
         "hitArrow-3.wav",
         "hitArrow-4.wav",
         "hitArrow-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-impactWood_medium_000.wav",
+        "impacts/impact-sounds-impactWood_medium_001.wav",
+        "impacts/impact-sounds-impactWood_medium_002.wav",
+        "impacts/impact-sounds-impactWood_medium_003.wav",
+        "impacts/impact-sounds-impactWood_medium_004.wav"
       ]
     },
     "hitSlash": {
@@ -283,16 +458,30 @@ window.PixWorldSfxLibrary = {
         "hitSlash-3.wav",
         "hitSlash-4.wav",
         "hitSlash-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-impactMetal_medium_000.wav",
+        "impacts/impact-sounds-impactMetal_medium_001.wav",
+        "impacts/impact-sounds-impactMetal_medium_002.wav",
+        "impacts/impact-sounds-impactMetal_medium_003.wav",
+        "impacts/impact-sounds-impactMetal_medium_004.wav"
       ]
     },
     "hitOrb": {
-      "gain": 0.85,
+      "gain": 0.78,
       "files": [
         "hitOrb-1.wav",
         "hitOrb-2.wav",
         "hitOrb-3.wav",
         "hitOrb-4.wav",
         "hitOrb-5.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/sci-fi-sounds-explosionCrunch_000.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_001.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_002.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_003.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_004.wav"
       ]
     },
     "impactSpark": {
@@ -303,6 +492,13 @@ window.PixWorldSfxLibrary = {
         "impactSpark-3.wav",
         "impactSpark-4.wav",
         "impactSpark-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-impactGlass_light_000.wav",
+        "impacts/impact-sounds-impactGlass_light_001.wav",
+        "impacts/impact-sounds-impactGlass_light_002.wav",
+        "impacts/impact-sounds-impactGlass_light_003.wav",
+        "impacts/impact-sounds-impactGlass_light_004.wav"
       ]
     },
     "hurt": {
@@ -313,6 +509,13 @@ window.PixWorldSfxLibrary = {
         "hurt-3.wav",
         "hurt-4.wav",
         "hurt-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-impactPunch_medium_000.wav",
+        "impacts/impact-sounds-impactPunch_medium_001.wav",
+        "impacts/impact-sounds-impactPunch_medium_002.wav",
+        "impacts/impact-sounds-impactPunch_medium_003.wav",
+        "impacts/impact-sounds-impactPunch_medium_004.wav"
       ]
     },
     "hurtCritical": {
@@ -323,6 +526,13 @@ window.PixWorldSfxLibrary = {
         "hurtCritical-3.wav",
         "hurtCritical-4.wav",
         "hurtCritical-5.wav"
+      ],
+      "sourceFiles": [
+        "impacts/impact-sounds-impactPunch_heavy_000.wav",
+        "impacts/impact-sounds-impactPunch_heavy_001.wav",
+        "impacts/impact-sounds-impactPunch_heavy_002.wav",
+        "impacts/impact-sounds-impactPunch_heavy_003.wav",
+        "impacts/impact-sounds-impactPunch_heavy_004.wav"
       ]
     },
     "fizzle": {
@@ -332,6 +542,12 @@ window.PixWorldSfxLibrary = {
         "fizzle-2.wav",
         "fizzle-3.wav",
         "fizzle-4.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/digital-audio-lowDown.wav",
+        "digital-beeps/digital-audio-lowRandom.wav",
+        "digital-beeps/sci-fi-sounds-slime_000.wav",
+        "digital-beeps/sci-fi-sounds-slime_001.wav"
       ]
     },
     "ko": {
@@ -342,6 +558,13 @@ window.PixWorldSfxLibrary = {
         "ko-3.wav",
         "ko-4.wav",
         "ko-5.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/sci-fi-sounds-lowFrequency_explosion_000.wav",
+        "digital-beeps/sci-fi-sounds-lowFrequency_explosion_001.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_002.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_003.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_004.wav"
       ]
     },
     "koBoom": {
@@ -352,6 +575,13 @@ window.PixWorldSfxLibrary = {
         "koBoom-3.wav",
         "koBoom-4.wav",
         "koBoom-5.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/sci-fi-sounds-explosionCrunch_000.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_001.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_002.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_003.wav",
+        "digital-beeps/sci-fi-sounds-explosionCrunch_004.wav"
       ]
     },
     "koEnemy": {
@@ -363,6 +593,14 @@ window.PixWorldSfxLibrary = {
         "koEnemy-4.wav",
         "koEnemy-5.wav",
         "koEnemy-6.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/digital-audio-powerUp7.wav",
+        "digital-beeps/digital-audio-powerUp8.wav",
+        "digital-beeps/digital-audio-powerUp9.wav",
+        "digital-beeps/digital-audio-powerUp10.wav",
+        "digital-beeps/digital-audio-powerUp11.wav",
+        "digital-beeps/digital-audio-powerUp12.wav"
       ]
     },
     "respawn": {
@@ -373,6 +611,13 @@ window.PixWorldSfxLibrary = {
         "respawn-3.wav",
         "respawn-4.wav",
         "respawn-5.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/digital-audio-highUp.wav",
+        "digital-beeps/digital-audio-threeTone1.wav",
+        "digital-beeps/digital-audio-threeTone2.wav",
+        "digital-beeps/digital-audio-phaseJump4.wav",
+        "digital-beeps/digital-audio-phaseJump5.wav"
       ]
     },
     "regen": {
@@ -384,6 +629,14 @@ window.PixWorldSfxLibrary = {
         "regen-4.wav",
         "regen-5.wav",
         "regen-6.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/digital-audio-tone1.wav",
+        "digital-beeps/digital-audio-twoTone1.wav",
+        "digital-beeps/digital-audio-twoTone2.wav",
+        "digital-beeps/digital-audio-pepSound1.wav",
+        "digital-beeps/digital-audio-pepSound2.wav",
+        "digital-beeps/digital-audio-pepSound3.wav"
       ]
     },
     "shieldOff": {
@@ -393,6 +646,12 @@ window.PixWorldSfxLibrary = {
         "shieldOff-2.wav",
         "shieldOff-3.wav",
         "shieldOff-4.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/digital-audio-highDown.wav",
+        "digital-beeps/digital-audio-phaserDown1.wav",
+        "digital-beeps/digital-audio-phaserDown2.wav",
+        "digital-beeps/digital-audio-phaserDown3.wav"
       ]
     },
     "playerJoin": {
@@ -403,6 +662,13 @@ window.PixWorldSfxLibrary = {
         "playerJoin-3.wav",
         "playerJoin-4.wav",
         "playerJoin-5.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/interface-sounds-open_001.wav",
+        "ui-clicks/interface-sounds-open_002.wav",
+        "ui-clicks/interface-sounds-open_003.wav",
+        "ui-clicks/interface-sounds-open_004.wav",
+        "digital-beeps/digital-audio-highUp.wav"
       ]
     },
     "playerLeave": {
@@ -413,6 +679,13 @@ window.PixWorldSfxLibrary = {
         "playerLeave-3.wav",
         "playerLeave-4.wav",
         "playerLeave-5.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/interface-sounds-close_001.wav",
+        "ui-clicks/interface-sounds-close_002.wav",
+        "ui-clicks/interface-sounds-close_003.wav",
+        "ui-clicks/interface-sounds-close_004.wav",
+        "digital-beeps/digital-audio-lowDown.wav"
       ]
     },
     "connectionLost": {
@@ -422,6 +695,12 @@ window.PixWorldSfxLibrary = {
         "connectionLost-2.wav",
         "connectionLost-3.wav",
         "connectionLost-4.wav"
+      ],
+      "sourceFiles": [
+        "ui-clicks/interface-sounds-glitch_001.wav",
+        "ui-clicks/interface-sounds-glitch_002.wav",
+        "ui-clicks/interface-sounds-glitch_003.wav",
+        "ui-clicks/interface-sounds-glitch_004.wav"
       ]
     },
     "connected": {
@@ -432,6 +711,13 @@ window.PixWorldSfxLibrary = {
         "connected-3.wav",
         "connected-4.wav",
         "connected-5.wav"
+      ],
+      "sourceFiles": [
+        "digital-beeps/digital-audio-threeTone1.wav",
+        "digital-beeps/digital-audio-threeTone2.wav",
+        "digital-beeps/digital-audio-powerUp1.wav",
+        "digital-beeps/digital-audio-powerUp2.wav",
+        "digital-beeps/digital-audio-powerUp3.wav"
       ]
     }
   }

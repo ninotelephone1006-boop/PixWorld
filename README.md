@@ -42,9 +42,9 @@ Chaque client gère ses propres points de vie et les transmet aux autres 20 fois
 
 Le jeu mélange deux sources, derrière une seule API (`src/audio.js`) :
 
-- **une banque de 199 fichiers Wave** dans `assets/sfx/` — des sons libres (**CC0**) repris sur GitHub (dépôt [Daarko/sparkstream-sounds](https://github.com/Daarko/sparkstream-sounds), extraits des packs de [Kenney](https://kenney.nl)), puis **adaptés** pour PixWorld par `tools/build-sfx.mjs` : passage en mono 44,1 kHz, suppression des silences, normalisation, coupure à 0,8 s maximum et renommage par événement. Ils couvrent l'interface (survol, sélection, saisie, erreur, pause…), les déplacements (saut, atterrissage), chaque attaque (shuriken, arc qui s'arme puis décoche, coupes de sabre, incantation puis orbe), les impacts, les blessures, le K.O., la réapparition, la régénération et les arrivées / départs de joueurs ;
-- **jusqu'à 6 variantes par événement**, tirées au hasard (jamais deux fois la même de suite) : un enchaînement de coups ne sonne jamais deux fois pareil ;
-- **les pas, générés en code** : aucune sample, une famille de bruits par matière (herbe, terre, pierre, bois, neige) × 6 variantes, synthétisées à la volée avec des paramètres figés par hachage (`STEP_MATERIALS` dans `src/audio.js`) ;
+- **une banque de 199 fichiers Wave**, répartis entre 41 événements dans `assets/sfx/` — des sons libres (**CC0**) repris sur GitHub (dépôt [Daarko/sparkstream-sounds](https://github.com/Daarko/sparkstream-sounds), extraits des packs de [Kenney](https://kenney.nl)), puis **adaptés** pour PixWorld par `tools/build-sfx.mjs` : passage en mono 44,1 kHz, suppression des silences, normalisation, coupure à 0,8 s maximum et renommage par événement. Les pas utilisent des prises d'herbe dédiées ; le lancement de l'orbe utilise un souffle de combustion et son impact une explosion, plutôt que des sons de laser ou de métal ;
+- **jusqu'à 8 variantes par événement**, tirées au hasard (jamais deux fois la même de suite) : un enchaînement de coups ne sonne jamais deux fois pareil ;
+- **les pas**, avec cinq samples enregistrés sur l'herbe du niveau ; les matières sans banque dédiée (terre, pierre, bois, neige) disposent de six variantes synthétisées en secours (`STEP_MATERIALS` dans `src/audio.js`) ;
 - **une synthèse de secours** (ZzFX, [MIT](https://github.com/KilledByAPixel/ZzFX)) qui prend le relais si un fichier n'est pas encore décodé ou n'a pas pu être chargé (page ouverte en `file://`, hors ligne…) : le jeu n'est jamais silencieux.
 
 Les fichiers sont téléchargés **à la demande**, les sons les plus fréquents d'abord, puis décodés en arrière-plan après le premier geste de l'utilisateur. Le curseur de volume du menu est mémorisé, et le bouton 🔊 du HUD (ou la touche `M`) coupe le son.
@@ -91,9 +91,9 @@ Le mode est indiqué en haut à droite. Si le serveur redémarre, le jeu retente
 - `src/characters.js` — catalogue des combattants : feuille de sprite, réglages de combat (dégâts, recul, délai du projectile) et sons de chaque héros.
 - `src/game.js` — boucle de jeu, spritesheets, barres de vie, combat (recul, K.O., combo), effets d'attaque et interpolation des joueurs distants.
 - `src/effects.js` — particules, chiffres de dégâts, ondes de choc, secousses de caméra, flashs et vignette.
-- `src/audio.js` — lecture des effets sonores : banque de fichiers, pas générés en code, synthèse ZzFX de secours, spatialisation, volume et sourdine.
-- `src/sfx-library.js` — catalogue généré des sons (événement → variantes + gain), écrit par `tools/build-sfx.mjs`.
-- `assets/sfx/` — les 199 Wave adaptés (CC0), 3 à 6 variantes par événement.
+- `src/audio.js` — lecture des effets sonores : banque de fichiers, pas d'herbe échantillonnés, autres matières synthétisées en secours, spatialisation, volume et sourdine.
+- `src/sfx-library.js` — catalogue généré des sons (événement → variantes, sources d'origine et gain), écrit par `tools/build-sfx.mjs`.
+- `assets/sfx/` — les 199 Wave adaptés (CC0), 3 à 8 variantes par événement.
 - `src/net.js` — WebSocket, repli sur `BroadcastChannel` et reconnexion.
 - `tools/make-sprites.py` — générateur (Pillow) des feuilles de sprites originales de Sora et Raiden.
 - `tools/build-sfx.mjs` — récupère les sons CC0 sur GitHub, les adapte (mono, 44,1 kHz, silences coupés, 0,8 s max) et régénère `assets/sfx/` + `src/sfx-library.js`.
@@ -107,7 +107,7 @@ Chaque client envoie sa position, son animation, son personnage, ses points de v
 npm test
 ```
 
-Les tests (sans dépendance) vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio — synthèse de chaque preset, pas générés en code, décodage des fichiers et repli sur la synthèse avec un faux navigateur (`test/audio.test.js`), l'intégrité de la banque de sons (`test/sfx-bank.test.js`), le moteur d'effets visuels (`test/effects.test.js`) et rejouent les transports en ligne et local, la reconnexion et la synchronisation des héros / attaques à l'aide de faux WebSocket et `BroadcastChannel` (`test/net.test.js`).
+Les tests (sans dépendance) vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio — synthèse de chaque preset, lecture des pas d'herbe dédiés, décodage des fichiers et repli synthèse avec un faux navigateur (`test/audio.test.js`), l'intégrité et la correspondance des sources de la banque de sons (`test/sfx-bank.test.js`), le moteur d'effets visuels (`test/effects.test.js`) et rejouent les transports en ligne et local, la reconnexion et la synchronisation des héros / attaques à l'aide de faux WebSocket et `BroadcastChannel` (`test/net.test.js`).
 
 ## Sprites et décor
 

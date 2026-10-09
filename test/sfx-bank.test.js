@@ -95,18 +95,33 @@ const onDisk = fs.readdirSync(SFX_DIR).filter((file) => file.endsWith(".wav"));
 onDisk.forEach((file) => assert(referenced.has(file), `${file} est référencé par la banque`));
 assert.strictEqual(referenced.size, onDisk.length, "Aucun fichier manquant ni orphelin");
 
-// Les pas ne viennent d'aucun fichier : ils sont générés en code.
-assert(!events.includes("step"), "Les pas ne font pas partie de la banque de fichiers");
+// Les pas du niveau sont associés à de vraies prises d'herbe CC0 ; leurs
+// six variantes synthétisées restent disponibles hors ligne.
+assert(!events.includes("step"), "Le nom générique step est résolu par matière");
+assert(library.events.stepGrass, "Les pas de l'herbe ont un événement dans la banque");
+assert.strictEqual(library.events.stepGrass.files.length, 5, "Cinq variantes d'herbe sont incluses");
 assert(
-  !onDisk.some((file) => file.startsWith("step")),
-  "Aucun fichier de pas : ils sont synthétisés par src/audio.js",
+  library.events.stepGrass.sourceFiles.every((file) => file.includes("footstep_grass")),
+  "Les pas proviennent d'enregistrements d'herbe, pas d'un preset générique",
 );
-console.log("  ok   Catalogue, fichiers et pas générés en code cohérents");
+assert(
+  library.events.castOrb.sourceFiles.every((file) => file.includes("thrusterFire")),
+  "Le lancement de l'orbe utilise une source de combustion",
+);
+assert(
+  library.events.hitOrb.sourceFiles.every((file) => file.includes("explosionCrunch")),
+  "L'impact de l'orbe utilise une source d'explosion",
+);
+console.log("  ok   Correspondance thématique des pas d'herbe et des effets de feu");
 
 // Chaque événement doit aussi exister côté moteur audio (repli synthèse).
 const audioSource = fs.readFileSync(path.join(ROOT, "src", "audio.js"), "utf8");
+const audioSandbox = { window: {}, console };
+vm.createContext(audioSandbox);
+vm.runInContext(audioSource, audioSandbox);
+const presets = new Set(audioSandbox.window.PixWorldAudio.names);
 events.forEach((name) => {
-  assert(audioSource.includes(`    ${name}:`), `« ${name} » a bien un preset de secours dans src/audio.js`);
+  assert(presets.has(name), `« ${name} » a bien un preset de secours dans src/audio.js`);
 });
 console.log("  ok   Chaque événement garde un preset de synthèse de secours");
 

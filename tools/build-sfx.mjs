@@ -11,8 +11,9 @@
  *   - raccourcissement à 0,8 s maximum (un jeu n'a pas besoin de plus) ;
  *   - renommage en `<événement>-<n>.wav`, un fichier par variante.
  *
- * Les pas, eux, sont générés en code (voir STEP_MATERIALS dans src/audio.js) :
- * ce script ne produit donc aucun fichier pour l'événement « step ».
+ * Les pas sur l'herbe utilisent cinq samples dédiés du pack Impact Sounds ;
+ * la synthèse de src/audio.js reste le secours hors ligne et sert aux autres
+ * matières tant qu'elles n'ont pas de banque dédiée.
  *
  * Utilisation :
  *   node tools/build-sfx.mjs                 # télécharge puis convertit
@@ -81,9 +82,12 @@ const PICKS = {
   uiToggleOff: { gain: 0.55, files: family(`${UI}ui-audio-switch`, 6, 10) },
   toast: { gain: 0.4, files: [...padded(`${UI}interface-sounds-question`, 1, 3), `${UI}interface-sounds-pluck_001.wav`, `${UI}interface-sounds-pluck_002.wav`] },
 
-  // ── Déplacements (les pas sont générés en code) ───────────────────────
+  // ── Déplacements ──────────────────────────────────────────────────────
   jump: { gain: 0.65, files: family(`${DIG}digital-audio-phaseJump`, 1, 5) },
   land: { gain: 0.7, files: padded(`${IMP}impact-sounds-impactSoft_medium`, 0, 4) },
+  // La scène de jeu est un sol d'herbe : on utilise les prises de pas
+  // enregistrées pour cette matière, pas du bruit synthétique générique.
+  stepGrass: { gain: 0.5, files: padded(`${IMP}impact-sounds-footstep_grass`, 0, 4) },
 
   // ── Attaques ──────────────────────────────────────────────────────────
   throwShuriken: { gain: 0.55, files: [`${RPG}rpg-audio-knifeSlice.wav`, `${RPG}rpg-audio-knifeSlice2.wav`, ...family(`${RPG}rpg-audio-drawKnife`, 1, 3)] },
@@ -95,13 +99,16 @@ const PICKS = {
   slashRing: { gain: 0.45, files: padded(`${IMP}impact-sounds-impactPlate_light`, 0, 4) },
   slashHeavy: { gain: 0.9, files: padded(`${IMP}impact-sounds-impactMetal_heavy`, 0, 4) },
   chargeOrb: { gain: 0.5, files: family(`${DIG}digital-audio-powerUp`, 1, 5) },
-  castOrb: { gain: 0.7, files: [...padded(`${DIG}sci-fi-sounds-laserLarge`, 0, 4), ...padded(`${DIG}sci-fi-sounds-laserRetro`, 0, 4)] },
+  // L'orbe est un projectile enflammé : son lancement doit évoquer une
+  // combustion, pas un laser électronique.
+  castOrb: { gain: 0.62, files: padded(`${DIG}sci-fi-sounds-thrusterFire`, 0, 4) },
 
   // ── Impacts et blessures ──────────────────────────────────────────────
   hitShuriken: { gain: 0.7, files: padded(`${IMP}impact-sounds-impactMetal_light`, 0, 4) },
   hitArrow: { gain: 0.8, files: padded(`${IMP}impact-sounds-impactWood_medium`, 0, 4) },
   hitSlash: { gain: 0.9, files: padded(`${IMP}impact-sounds-impactMetal_medium`, 0, 4) },
-  hitOrb: { gain: 0.85, files: padded(`${DIG}sci-fi-sounds-impactMetal`, 0, 4) },
+  // L'impact de l'orbe enflammé est un éclat explosif, pas un choc métallique.
+  hitOrb: { gain: 0.78, files: padded(`${DIG}sci-fi-sounds-explosionCrunch`, 0, 4) },
   impactSpark: { gain: 0.4, files: padded(`${IMP}impact-sounds-impactGlass_light`, 0, 4) },
   hurt: { gain: 0.8, files: padded(`${IMP}impact-sounds-impactPunch_medium`, 0, 4) },
   hurtCritical: { gain: 0.95, files: padded(`${IMP}impact-sounds-impactPunch_heavy`, 0, 4) },
@@ -256,6 +263,7 @@ const missing = [];
 
 for (const [event, pick] of Object.entries(PICKS)) {
   const files = [];
+  const sourceFiles = [];
   pick.files.forEach((relative, index) => {
     const input = path.join(soundRoot, relative);
     if (!fs.existsSync(input)) {
@@ -270,8 +278,9 @@ for (const [event, pick] of Object.entries(PICKS)) {
     bytes += samples.length * 2 + 44;
     seconds += samples.length / rate;
     files.push(name);
+    sourceFiles.push(relative);
   });
-  library.events[event] = { gain: pick.gain, files };
+  library.events[event] = { gain: pick.gain, files, sourceFiles };
 }
 
 const header = `/**
@@ -282,9 +291,9 @@ const header = `/**
  * disponibles dans assets/sfx/ et le gain à leur appliquer.
  *
  * Provenance : dépôt ${SOURCE.repo} (extraits des packs Kenney, CC0 1.0).
- * Les pas (« step ») sont absents de cette liste : ils sont synthétisés en
- * code par src/audio.js. Quand un événement n'a pas de fichier (ou que le
- * navigateur n'a pas pu les charger), src/audio.js retombe sur la synthèse.
+ * Les pas d'herbe (« stepGrass ») ont des samples dédiés ; les autres
+ * matières et les événements non chargés gardent un secours synthétisé.
+ * Chaque événement conserve aussi ses noms de fichiers source pour audit.
  */
 `;
 
