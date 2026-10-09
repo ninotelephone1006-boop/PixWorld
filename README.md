@@ -182,7 +182,9 @@ Chaque client envoie sa position, son animation, son personnage, ses points de v
 npm test
 ```
 
-Les tests vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, inventaire et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage des drops (`test/net.test.js`, `test/server.test.js`).
+Le démarrage complet de la page est rejoué sans navigateur (`test/game-boot.test.js`) : chargement des scripts, quatre héros affichés, connexion à l'arène, entrée en jeu et arrivée d'un autre joueur — de quoi repérer immédiatement un script qui planterait au chargement.
+
+Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, inventaire et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage des drops (`test/net.test.js`, `test/server.test.js`).
 
 ## Sprites et décor
 

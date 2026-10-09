@@ -135,7 +135,10 @@
   const WORLD_SEED = "pixworld";
   const world = window.PixWorldWorld.create(WORLD_SEED);
   const WORLD_WIDTH = world.width;
-  const BLOCK_SIZE = player.height / 2; // deux blocs = la hauteur de collision du joueur
+  // Deux blocs empilés font la hauteur de collision du héros (60 px), mais la
+  // valeur de référence reste celle du module de minage : le serveur compte les
+  // colonnes avec cette même constante, donc le client doit suivre.
+  const BLOCK_SIZE = window.PixWorldMining.constants.BLOCK_SIZE;
   const mining = window.PixWorldMining.create({ worldWidth: WORLD_WIDTH, blockSize: BLOCK_SIZE });
   const miningTextures = Object.create(null);
   Object.keys(window.PixWorldMining.BLOCKS).forEach((type) => {
