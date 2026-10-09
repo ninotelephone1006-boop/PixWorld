@@ -147,6 +147,13 @@ window.PixWorldNet = (() => {
       pickupDrop(dropId) {
         if (joined && mode === "online") send({ t: "minePickup", dropId: String(dropId) });
       },
+      /**
+       * Envoie une ligne de discussion. Le serveur la nettoie, la diffuse à
+       * tout le monde et exécute les commandes (« /tp », « /kill »).
+       */
+      say(text) {
+        if (joined && mode === "online") send({ t: "chat", text: String(text).slice(0, 200) });
+      },
       close() { closed = true; clearTimeout(retry); detach(); },
     };
   }

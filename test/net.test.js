@@ -160,9 +160,20 @@ async function testOnlineGame() {
   check("les piles de mort reçues sont relayées sans perdre les quantités",
     events[events.length - 1].t === "deathDrop" && events[events.length - 1].drops[0].quantity === 9);
 
+  // La discussion emprunte le même canal : une ligne, ou une commande.
+  net.say("Salut l'arène");
+  const chatRequest = socket.sent[socket.sent.length - 1];
+  check("une ligne de discussion est envoyée au serveur",
+    chatRequest && chatRequest.t === "chat" && chatRequest.text === "Salut l'arène", JSON.stringify(chatRequest));
+  net.say('/kill "Bob"');
+  const commandRequest = socket.sent[socket.sent.length - 1];
+  check("une commande part dans une ligne de discussion (le serveur la résout)",
+    commandRequest && commandRequest.t === "chat" && commandRequest.text === '/kill "Bob"', JSON.stringify(commandRequest));
+
   net.close();
   const sentBeforeClose = socket.sent.length;
   net.dropInventory(100, -30, { grass: 1 }, 9);
+  net.say("après fermeture");
   check("aucun butin réseau n'est envoyé après fermeture", socket.sent.length === sentBeforeClose);
 }
 
