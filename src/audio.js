@@ -6,12 +6,12 @@
  *   1. une banque de près de 200 fichiers Wave (assets/sfx/), repris de packs
  *      libres CC0 publiés sur GitHub puis adaptés par tools/build-sfx.mjs ;
  *      chaque événement possède plusieurs variantes, tirées au hasard pour
- *      qu'un enchaînement de coups ne sonne jamais deux fois pareil ;
+ *      qu'un enchaînement de coups ne sonne jamais deux fois pareil ; les pas
+ *      du niveau utilisent les prises d'herbe dédiées du pack CC0 ;
  *   2. une synthèse maison, dérivée de ZzFX (Frank Force, licence MIT, voir
  *      assets/CREDITS.md), qui prend le relais quand un fichier n'est pas
  *      encore chargé ou n'a pas pu l'être (page ouverte en file://, hors
- *      ligne…). Les **pas** sont volontairement toujours générés en code :
- *      une famille par matière, plusieurs variantes chacune.
+ *      ligne…). Elle génère aussi des pas de secours, adaptés à chaque matière.
  *
  *   PixWorldAudio.play("jump")                      → son local
  *   PixWorldAudio.playAt("slash", worldX)           → son d'un joueur distant
@@ -64,13 +64,15 @@ window.PixWorldAudio = (() => {
     slashRing: [0.32, 0.02, 2600, 0.001, 0.02, 0.22, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0.03, 0.4, 0.05],
     slashHeavy: [0.95, 0.1, 800, 0.004, 0.08, 0.3, 4, 1.5, -6, 0, 0, 0, 0, 0.9, 0, 0, 0.03, 0.6, 0, 0, 500],
     chargeOrb: [0.35, 0.05, 300, 0.05, 0.12, 0.1, 1, 1, 5, 0, 0, 0, 0.03, 0, 0, 0, 0, 0.6],
-    castOrb: [0.65, 0.05, 420, 0.03, 0.1, 0.35, 0, 1, 2, 0, 210, 0.08, 0, 0, 7, 0, 0.06, 0.7],
+    // Secours bruité et descendant : un souffle de flamme, pas un bip laser.
+    castOrb: [0.7, 0.02, 320, 0.006, 0.06, 0.24, 4, 1.4, -8, 0, -120, 0.06, 0, 0.9, 0, 0, 0.02, 0.6, 0, 0, -1500],
 
     // Impacts
     hitShuriken: [0.75, 0.05, 1900, 0.001, 0.02, 0.11, 1, 1.6, -10, 0, 0, 0, 0, 0.3, 0, 0, 0, 0.6],
     hitArrow: [0.85, 0.05, 260, 0.001, 0.03, 0.15, 4, 1.8, -5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0.6, 0, 0, -1600],
     hitSlash: [0.95, 0.05, 480, 0.001, 0.04, 0.26, 4, 1.5, -8, 0, 0, 0, 0, 0.7, 0, 0, 0.02, 0.6, 0, 0, -3000],
-    hitOrb: [0.85, 0.05, 600, 0.005, 0.08, 0.3, 0, 1.2, -4, 0, -220, 0.1, 0, 0.1, 8, 0, 0.05, 0.6],
+    // Éclat grave et granuleux pour l'impact du projectile enflammé.
+    hitOrb: [0.8, 0.02, 190, 0.001, 0.04, 0.25, 4, 1.3, -12, 0, -90, 0.04, 0, 0.85, 0, 0, 0.01, 0.55, 0.03, 0, -1200],
     impactSpark: [0.4, 0.1, 3200, 0.001, 0.01, 0.07, 1, 1.2, -20, 0, 0, 0, 0, 0.2, 0, 0, 0, 0.5],
     hurt: [0.85, 0.05, 520, 0.01, 0.02, 0.22, 2, 1.1, -12, 0, 0, 0, 0, 0.1, 0, 0, 0, 0.7, 0.05],
     hurtCritical: [0.95, 0.05, 330, 0.01, 0.05, 0.3, 2, 1.3, -10, 0, -60, 0.06, 0, 0.15, 0, 0, 0, 0.7, 0.05],
@@ -92,12 +94,10 @@ window.PixWorldAudio = (() => {
     connected: [0.55, 0.02, 523, 0.01, 0.08, 0.3, 0, 1, 0, 0, 262, 0.1, 0, 0, 0, 0, 0.05, 0.6],
   };
 
-  // ─────────────────── Pas : générés en code, aucune sample ───────────────────
-  // Une famille par matière, STEP_VARIANTS bruits chacune. Les paramètres
-  // sont figés par (matière, variante) via un petit hachage : deux pas de
-  // suite ne se ressemblent pas, mais le même pas reste identique d'une
-  // partie à l'autre. Aucun fichier n'est nécessaire, contrairement au reste
-  // de la banque (voir tools/build-sfx.mjs, qui ignore volontairement « step »).
+  // ─────────────────────── Pas par matière ──────────────────────────────
+  // L'herbe dispose de véritables prises CC0 dans la banque ; les autres
+  // matières (et le mode hors ligne) ont une synthèse dédiée de secours.
+  // Les variantes synthétisées sont figées par hachage pour rester stables.
   const STEP_MATERIALS = {
     grass: { frequency: 230, noise: 1, release: 0.05, filter: -1400, volume: 0.2, spread: 0.14 },
     dirt: { frequency: 185, noise: 1, release: 0.045, filter: -1100, volume: 0.22, spread: 0.12 },
@@ -108,7 +108,8 @@ window.PixWorldAudio = (() => {
   const STEP_VARIANTS = 6;
   let footstepMaterial = "grass";
 
-  const stepName = (material, variant) => `step${material[0].toUpperCase()}${material.slice(1)}${variant}`;
+  const stepEventName = (material) => `step${material[0].toUpperCase()}${material.slice(1)}`;
+  const stepName = (material, variant) => `${stepEventName(material)}${variant}`;
   const STEP_PATTERN = /^step([A-Z][a-z]+)(\d+)$/;
 
   /** Hachage déterministe (FNV-1a) → valeur dans [-1, 1]. */
@@ -119,6 +120,59 @@ window.PixWorldAudio = (() => {
       hash >>>= 0;
     }
     return (hash / 2147483647.5) - 1;
+  }
+
+  /** Générateur pseudo-aléatoire stable pour les sons de secours. */
+  function seededNoise(seed) {
+    let state = seed >>> 0;
+    return () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return (state / 2147483647.5) - 1;
+    };
+  }
+
+  /** Bruit bref, filtré et granuleux : secours plus proche d'un pas d'herbe. */
+  function buildGrassStepSamples(variant) {
+    const length = Math.round(SAMPLE_RATE * 0.14);
+    const samples = new Float32Array(length);
+    const random = seededNoise((0x9e3779b9 ^ Math.imul(variant, 0x45d9f3b)) >>> 0);
+    let low = 0;
+    for (let i = 0; i < length; i++) {
+      const t = i / (length - 1);
+      const noise = random();
+      low += (noise - low) * 0.1;
+      const envelope = (1 - Math.exp(-t * 180)) * Math.pow(1 - t, 2.8);
+      const thud = Math.sin(Math.PI * 2 * (82 + variant * 7) * t) * Math.exp(-t * 25);
+      const crackle = random() > 0.996 ? random() * 0.4 : 0;
+      samples[i] = (noise * 0.36 + (noise - low) * 0.28 + low * 0.12 + thud * 0.22 + crackle * 0.12) * envelope * 0.8;
+    }
+    return samples;
+  }
+
+  /** Souffle et crépitement déterministes pour lancement / impact de flamme. */
+  function buildFireballSamples(kind) {
+    const impact = kind === "impact";
+    const length = Math.round(SAMPLE_RATE * (impact ? 0.32 : 0.48));
+    const samples = new Float32Array(length);
+    const random = seededNoise(impact ? 0x4f1bbcdc : 0x7f4a7c15);
+    let low = 0;
+    let mid = 0;
+    let phase = 0;
+    for (let i = 0; i < length; i++) {
+      const t = i / (length - 1);
+      const noise = random();
+      low += (noise - low) * 0.03;
+      mid += (noise - mid) * 0.16;
+      const frequency = impact ? 150 - 75 * t : 360 - 250 * t;
+      phase += (Math.PI * 2 * frequency) / SAMPLE_RATE;
+      const rumble = Math.sin(phase);
+      const envelope = (1 - Math.exp(-t * (impact ? 280 : 110))) * Math.exp(-t * (impact ? 8 : 4.6));
+      const flutter = 0.82 + 0.18 * Math.sin(Math.PI * 2 * (impact ? 23 : 13) * t);
+      const crackle = random() > (impact ? 0.985 : 0.993) ? random() * 0.9 : 0;
+      const texture = noise - mid;
+      samples[i] = (texture * 0.32 + (mid - low) * 0.45 + low * 0.38 + rumble * (impact ? 0.24 : 0.34) + crackle * 0.22) * envelope * 0.7 * flutter;
+    }
+    return samples;
   }
 
   /** Paramètres ZzFX d'un pas : bruit filtré, très court. */
@@ -140,9 +194,9 @@ window.PixWorldAudio = (() => {
     return params;
   }
 
-  // Enregistre les pas comme n'importe quel autre preset : ils sont ensuite
-  // synthétisés et mis en cache exactement de la même façon.
+  // Enregistre une entrée de secours pour chaque famille et ses variantes.
   Object.keys(STEP_MATERIALS).forEach((material) => {
+    PRESETS[stepEventName(material)] = stepPreset(material, 1);
     for (let variant = 1; variant <= STEP_VARIANTS; variant++) {
       PRESETS[stepName(material, variant)] = stepPreset(material, variant);
     }
@@ -294,7 +348,7 @@ window.PixWorldAudio = (() => {
   // Sons entendus dès les premières secondes : interface, sauts et coups.
   const PRELOAD_FIRST = [
     "uiHover", "uiSelect", "uiConfirm", "uiBack", "uiType", "uiError", "uiToggleOn", "uiToggleOff", "toast",
-    "jump", "land", "hurt", "hurtCritical", "impactSpark",
+    "jump", "land", "stepGrass", "hurt", "hurtCritical", "impactSpark",
     "throwShuriken", "bowDraw", "bowRelease", "slash", "slashHeavy", "chargeOrb", "castOrb",
     "hitShuriken", "hitArrow", "hitSlash", "hitOrb", "fizzle",
     "ko", "koBoom", "koEnemy", "respawn", "regen", "playerJoin", "playerLeave", "connected",
@@ -337,11 +391,23 @@ window.PixWorldAudio = (() => {
     if (cache[name]) return cache[name];
     const preset = PRESETS[name];
     if (!preset) return null;
-    // On gèle la part aléatoire à la construction : la variation se fait
-    // ensuite via la vitesse de lecture, comme ZZFXSound.
-    const params = preset.slice();
-    params[1] = 0;
-    const samples = buildSamples(...params);
+
+    let samples;
+    const stepMatch = STEP_PATTERN.exec(name);
+    if (name === "castOrb") {
+      samples = buildFireballSamples("launch");
+    } else if (name === "hitOrb") {
+      samples = buildFireballSamples("impact");
+    } else if (stepMatch && stepMatch[1] === "Grass") {
+      samples = buildGrassStepSamples(Number(stepMatch[2]));
+    } else {
+      // On gèle la part aléatoire à la construction : la variation se fait
+      // ensuite via la vitesse de lecture, comme ZZFXSound.
+      const params = preset.slice();
+      params[1] = 0;
+      samples = buildSamples(...params);
+    }
+
     cache[name] = samples;
     return samples;
   }
@@ -434,7 +500,7 @@ window.PixWorldAudio = (() => {
     if (!ensureContext()) return;
     unlocked = true;
     // Pré-calcule les sons les plus fréquents pendant que le menu est ouvert.
-    ["jump", "land", "step", "hurt", "uiSelect", "uiHover"].forEach(samplesFor);
+    ["jump", "land", "stepGrass1", "hurt", "uiSelect", "uiHover"].forEach(samplesFor);
     // Puis décode les fichiers : les sons courants d'abord, le reste ensuite.
     if (BANK_EVENTS.length) {
       preloadBank(PRELOAD_FIRST).then(() => {
@@ -514,15 +580,23 @@ window.PixWorldAudio = (() => {
   }
 
   /**
-   * Résout le nom d'un son : « step » devient une variante générée en code
-   * (matière courante + numéro tiré au sort), les autres noms restent ceux
-   * de la banque / des presets.
+   * Résout le nom d'un son : « step » devient une variante par matière ;
+   * l'herbe est lue depuis sa banque CC0, les autres matières gardent leur
+   * synthèse de secours.
    */
   function resolveName(name, opts) {
     if (name !== "step") return name;
     const wanted = opts && opts.material;
     const material = (wanted && STEP_MATERIALS[wanted] ? wanted : STEP_MATERIALS[footstepMaterial] ? footstepMaterial : "grass");
     return stepName(material, 1 + Math.floor(Math.random() * STEP_VARIANTS));
+  }
+
+  /** Associe une variante synthétisée à sa banque, quand elle existe. */
+  function bankEventFor(resolved) {
+    const stepMatch = STEP_PATTERN.exec(resolved);
+    if (!stepMatch) return resolved;
+    const material = stepMatch[1][0].toLowerCase() + stepMatch[1].slice(1);
+    return stepEventName(material);
   }
 
   /**
@@ -534,13 +608,14 @@ window.PixWorldAudio = (() => {
   function play(name, options) {
     const opts = options || {};
     const resolved = resolveName(name, opts);
+    const event = bankEventFor(resolved);
 
-    const buffers = bankBuffers[resolved];
+    const buffers = bankBuffers[event];
     if (buffers && buffers.length) {
-      const entry = BANK[resolved];
+      const entry = BANK[event];
       const pitch = opts.pitch == null ? 1 : opts.pitch;
       const rate = pitch * (0.97 + Math.random() * 0.06);
-      return playBuffer(pickVariant(resolved, buffers), {
+      return playBuffer(pickVariant(event, buffers), {
         rate: clamp(rate, 0.2, 4),
         gain: clamp((opts.volume == null ? 1 : opts.volume) * (entry ? entry.gain : 1), 0, 2),
         pan: clamp(opts.pan || 0, -1, 1),
@@ -548,15 +623,15 @@ window.PixWorldAudio = (() => {
       });
     }
     // Pas encore chargé : on lance le téléchargement et on joue la synthèse.
-    if (BANK[resolved] && !preloaded.has(resolved)) {
-      preloaded.add(resolved);
-      loadEvent(resolved);
+    if (BANK[event] && !preloaded.has(event)) {
+      preloaded.add(event);
+      loadEvent(event);
     }
 
     const samples = samplesFor(resolved);
     if (!samples) return null;
     const preset = PRESETS[resolved];
-    const randomness = resolved === "step" || preset[1] == null ? 0.06 : preset[1] || 0;
+    const randomness = STEP_PATTERN.test(resolved) || preset[1] == null ? 0.06 : preset[1] || 0;
     const pitch = opts.pitch == null ? 1 : opts.pitch;
     const rate = pitch + pitch * randomness * (Math.random() * 2 - 1);
     return playSamples(samples, {
@@ -664,7 +739,7 @@ window.PixWorldAudio = (() => {
         loaded: Object.keys(bankBuffers).length,
       };
     },
-    /** Matière des pas : grass, dirt, stone, wood, snow (générés en code). */
+    /** Matière des pas : grass (samples dédiés), dirt, stone, wood ou snow. */
     get footstepMaterial() {
       return footstepMaterial;
     },

@@ -85,7 +85,8 @@ assert.strictEqual(bank.loaded, 0, "Rien n'est décodé sans AudioContext");
 bank.events.forEach((name) => assert(names.includes(name), "« " + name + " » a un preset de secours"));
 console.log("  ok   " + bank.files + " fichiers déclarés pour " + bank.events.length + " événements");
 
-// Pas générés en code : une famille par matière, plusieurs variantes chacune.
+// Pas adaptés à la matière : l'herbe a des fichiers dédiés et toutes les
+// matières gardent plusieurs variantes de secours synthétisées.
 const materials = audio.footstepMaterials;
 assert(materials.length >= 3, "Au moins trois matières de pas");
 materials.forEach((material) => {
@@ -110,7 +111,7 @@ assert.strictEqual(audio.setFootstepMaterial("inconnu"), "snow", "Une matière i
 audio.setFootstepMaterial("grass");
 assert.doesNotThrow(() => audio.play("step", { volume: 0.8 }), "Jouer un pas ne plante pas");
 assert.doesNotThrow(() => audio.playAt("step", 900, { volume: 0.5 }), "Jouer un pas lointain ne plante pas");
-console.log("  ok   Pas générés en code : " + materials.length + " matières × 6 variantes");
+console.log("  ok   Pas d'herbe échantillonnés, " + materials.length + " matières × 6 variantes de secours");
 
 // L'API ne doit jamais lever d'erreur, même sans son.
 assert.strictEqual(audio.play("jump"), null, "play() sans AudioContext renvoie null sans planter");
@@ -258,16 +259,24 @@ function fileFetch(url) {
   const synth = fallback.play("slash");
   assert(synth, "La synthèse assure le relais");
   assert.strictEqual(synth.buffer.fromFile, false, "C'est bien la synthèse");
+  const offlineStep = fallback.play("step", { material: "grass" });
+  assert(offlineStep, "Le pas d'herbe garde un secours hors ligne");
+  assert.strictEqual(offlineStep.buffer.fromFile, false, "Le pas d'herbe hors ligne est synthétisé");
 
-  // Les pas restent générés en code, même avec une banque disponible.
+  // Le pas par défaut utilise les samples d'herbe de la banque dès qu'ils
+  // sont décodés, et non un preset de bruit générique.
+  await engine.loadEvent("stepGrass");
+  const grassStep = engine.play("step", { volume: 0.8, material: "grass" });
+  assert(grassStep, "Un pas d'herbe est joué");
+  assert.strictEqual(grassStep.buffer.fromFile, true, "Le pas d'herbe utilise son fichier dédié");
   const steps = new Set();
   for (let i = 0; i < 40; i++) {
     const voice = engine.play("step", { volume: 0.8 });
-    if (voice) steps.add(voice.buffer.length);
+    if (voice) steps.add(voice.buffer);
   }
-  assert(steps.size >= 3, "Les pas varient d'un appel à l'autre");
+  assert(steps.size >= 3, "Les variantes de pas d'herbe alternent (" + steps.size + ")");
   assert(started.length > 40, "Les voix démarrées sont comptées");
-  console.log("  ok   Fichiers décodés, variantes alternées, repli synthèse et pas codés");
+  console.log("  ok   Fichiers décodés, variantes alternées, repli synthèse et pas d'herbe");
   console.log("Moteur audio valide");
 })().catch((error) => {
   console.error(error);
