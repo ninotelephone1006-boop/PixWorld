@@ -57,7 +57,7 @@ const server = http.createServer((req, res) => {
   if (pathname === "/players") {
     const roster = Array.from(players.values())
       .filter((p) => p.joined)
-      .map((p) => ({ name: p.name, color: p.color }));
+      .map((p) => ({ name: p.name, character: p.character }));
     res.writeHead(200, { "content-type": MIME[".json"], "cache-control": "no-store" });
     res.end(JSON.stringify({ online: roster.length, players: roster }));
     return;
@@ -86,7 +86,7 @@ const server = http.createServer((req, res) => {
 
 // ───────────────────────────── État des joueurs ─────────────────────────────
 
-/** id -> { id, name, color, socket, state, lastSeen, rate } */
+/** id -> { id, name, character, socket, state, lastSeen, rate } */
 const players = new Map();
 let nextId = 1;
 
@@ -103,10 +103,6 @@ function cleanName(raw) {
     .trim()
     .slice(0, 14);
   return text || "Ninja";
-}
-
-function cleanColor(raw) {
-  return /^#[0-9a-fA-F]{6}$/.test(String(raw)) ? String(raw) : "#ff8a5c";
 }
 
 function cleanCharacter(raw) {
@@ -176,21 +172,20 @@ function registerPlayer(socket) {
   const player = {
     id,
     name: "Ninja",
-    color: "#ff8a5c",
     character: "ninja",
     socket,
     lastSeen: Date.now(),
     joined: false, // devient vrai à la réception du "hello" (pseudo choisi)
     messages: 0,
     windowStart: Date.now(),
-    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0 },
+    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0, hp: 100 },
   };
   players.set(id, player);
 
   const roster = [];
   players.forEach((other) => {
     if (other.id !== id && other.joined) {
-      roster.push({ id: other.id, name: other.name, color: other.color, character: other.character });
+      roster.push({ id: other.id, name: other.name, character: other.character });
     }
   });
   send(socket, { t: "welcome", id, players: roster });
@@ -234,9 +229,8 @@ function handleMessage(player, message) {
 
   if (message.t === "hello" || message.t === "rename") {
     player.name = cleanName(message.name);
-    player.color = cleanColor(message.color);
     player.character = cleanCharacter(message.character);
-    const info = { id: player.id, name: player.name, color: player.color, character: player.character };
+    const info = { id: player.id, name: player.name, character: player.character };
     if (message.t === "hello") {
       player.joined = true;
       broadcast({ t: "join", player: info }, player.id);
@@ -257,6 +251,7 @@ function handleMessage(player, message) {
       a: clampNumber(message.a, 0, 1, 0),
       c: cleanCharacter(message.c || player.character),
       n: Math.floor(clampNumber(message.n, 0, 2147483647, player.state.n || 0)),
+      hp: Math.round(clampNumber(message.hp, 0, 100, player.state.hp == null ? 100 : player.state.hp)),
     };
   }
 }
@@ -279,7 +274,6 @@ setInterval(() => {
       snapshot.push(Object.assign({
         id: player.id,
         name: player.name,
-        color: player.color,
         character: player.character,
       }, player.state));
     }

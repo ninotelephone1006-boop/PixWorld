@@ -504,7 +504,7 @@
 
 .menu-identity {
   display: grid;
-  grid-template-columns: minmax(140px, 0.84fr) minmax(160px, 1.16fr);
+  grid-template-columns: 1fr;
   align-items: end;
   gap: 14px;
 }
@@ -546,38 +546,6 @@
   border-color: rgb(255 194 107 / 68%);
   background: rgb(4 13 26 / 72%);
   box-shadow: 0 0 0 3px rgb(255 191 103 / 11%);
-}
-
-.menu-colors {
-  display: flex;
-  min-height: 37px;
-  align-items: center;
-  gap: 8px;
-}
-
-.menu-color {
-  position: relative;
-  width: 19px;
-  height: 19px;
-  flex: none;
-  padding: 0;
-  border: 2px solid transparent;
-  border-radius: 50%;
-  outline: none;
-  background: var(--swatch-color);
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 12%);
-  cursor: pointer;
-  transition: transform 140ms ease, box-shadow 140ms ease;
-}
-
-.menu-color:hover {
-  transform: scale(1.14);
-}
-
-.menu-color[aria-pressed="true"] {
-  transform: scale(1.11);
-  border-color: #fff;
-  box-shadow: 0 0 0 3px rgb(255 255 255 / 13%), 0 0 15px color-mix(in srgb, var(--swatch-color) 54%, transparent);
 }
 
 .menu-actions {
@@ -697,8 +665,7 @@
 .character-card:focus-visible,
 .menu-close:focus-visible,
 .menu-primary:focus-visible,
-.menu-secondary:focus-visible,
-.menu-color:focus-visible {
+.menu-secondary:focus-visible {
   outline: 2px solid #ffe0ad;
   outline-offset: 3px;
 }
@@ -931,10 +898,6 @@
   .menu-identity {
     grid-template-columns: 1fr;
     gap: 10px;
-  }
-
-  .menu-colors {
-    min-height: 27px;
   }
 
   .menu-actions {
