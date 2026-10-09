@@ -98,12 +98,14 @@ Les touffes sont posées sur le relief de la prairie. L'herbe du premier plan, a
 
 ## Minage 2D et inventaire
 
-Le terrain de chaque colonne est une grille de blocs carrés de **30 × 30 px** : **1 couche d'herbe**, **4 couches de terre**, puis **10 couches de pierre**. Le joueur fait 60 px de haut dans sa boîte de collision : **2 blocs correspondent donc exactement à sa hauteur**. Les textures pixel art de l'herbe, de la terre et de la pierre sont des adaptations du pack CC0 « Pixel Platformer » de Kenney (source GitHub et licence dans `assets/CREDITS.md`).
+Le terrain de chaque colonne est une grille de blocs carrés de **32 × 32 px** : **1 couche d'herbe**, **4 couches de terre**, puis **10 couches de pierre** — la dernière est de la **roche mère incassable**, le plancher du monde : personne ne tombe dans le vide, et les blocs forment de vraies parois solides (collisions complètes, on ne traverse ni les murs ni les tours). Les textures pixel art de l'herbe, de la terre et de la pierre sont générées par `tools/make-blocks.py` depuis la feuille de tuiles CC0 « Pixel Platformer » de Kenney (source GitHub et licence dans `assets/CREDITS.md`) : chaque texture est **sans couture** (miroitée), donc les blocs se prolongent **sans aucune délimitation visible** entre eux.
 
 - Le bloc visé par la souris reçoit un contour lumineux. Maintiens le clic gauche sur le même bloc pendant **2 secondes** : les fissures progressent, puis le bloc casse et laisse tomber un petit item.
-- Touche un item pour l'ajouter automatiquement à ton inventaire. Les quantités sont personnelles ; dans l'arène en ligne, le terrain cassé et les drops sont synchronisés, et le premier joueur qui touche un drop le récupère.
+- **Clic droit : poser le bloc sélectionné**, façon Minecraft — uniquement contre un bloc existant (jamais en plein air), à portée de main et jamais à l'intérieur d'un joueur. Casser un bloc d'une tour ne fait rien d'autre : rien ne s'effondre.
+- Touche un item pour l'ajouter automatiquement à ton inventaire. Les quantités sont personnelles ; dans l'arène en ligne, le terrain cassé, les blocs posés et les drops sont synchronisés, et le premier joueur qui touche un drop le récupère.
 - La barre verticale de raccourcis, au **milieu du bord droit**, affiche les trois blocs et leurs quantités. Fais défiler la molette (ou utilise `1`, `2`, `3`) pour changer d'emplacement ; tu peux aussi cliquer sur un emplacement.
-- Les modifications du terrain sont gardées en mémoire par le serveur de l'arène ; elles sont partagées par les joueurs connectés et disparaissent lors d'un redémarrage du serveur. Sans connexion, le minage fonctionne localement dans l'onglet.
+- **Caméra verticale** : en surface, seules **deux rangées de blocs** sont visibles sous le sol (herbe + terre) — la roche n'apparaît que lorsqu'on creuse, la caméra descendant alors avec le joueur.
+- Les modifications du terrain sont gardées en mémoire par le serveur de l'arène ; elles sont partagées par les joueurs connectés et disparaissent lors d'un redémarrage du serveur. Sans connexion, le minage et la pose fonctionnent localement dans l'onglet.
 
 ## Effets sonores
 
@@ -150,6 +152,7 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `Espace` : sauter
 - `X` : lancer l'attaque du héros
 - Clic gauche sur un bloc : miner (maintenir 2 secondes) ; clic dans le vide : attaque du héros
+- Clic droit : poser le bloc sélectionné (contre un bloc existant, à portée)
 - Molette (ou `1` / `2` / `3`) : sélectionner l'emplacement de raccourci
 - `Échap` : ouvrir le menu pause / reprendre
 - `M` : couper / rétablir le son

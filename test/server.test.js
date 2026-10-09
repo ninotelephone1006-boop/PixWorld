@@ -35,7 +35,7 @@ async function until(client, predicate) {
   const aw = await until(a, (m) => m.t === "welcome");
   const bw = await until(b, (m) => m.t === "welcome");
   assert.notEqual(aw.id, bw.id);
-  assert.deepEqual(aw.mining, { mined: [], drops: [] });
+  assert.deepEqual(aw.mining, { mined: [], placed: [], drops: [] });
   a.socket.send(JSON.stringify({ t: "hello", name: "Alice", character: "ninja" }));
   b.socket.send(JSON.stringify({ t: "hello", name: "Bob", character: "mage" }));
   await until(a, (m) => m.t === "join" && m.player.name === "Bob");
@@ -56,6 +56,22 @@ async function until(client, predicate) {
   assert.equal(minedByA.ownerId, aw.id);
   assert.equal(minedByB.column, 12);
   assert.equal(minedByB.row, 0);
+
+  // Pose de blocs : contre la surface oui, en plein air non (placeRejected).
+  a.socket.send(JSON.stringify({ t: "placeBlock", column: 13, row: -1, type: "dirt", serial: 7 }));
+  const placedByA = await until(b, (m) => m.t === "placeBlock" && m.serial === 7);
+  assert.equal(placedByA.type, "dirt");
+  assert.equal(placedByA.ownerId, aw.id);
+  a.socket.send(JSON.stringify({ t: "placeBlock", column: 60, row: -4, type: "stone", serial: 8 }));
+  const rejected = await until(a, (m) => m.t === "placeRejected" && m.serial === 8);
+  assert.equal(rejected.serial, 8);
+  // La roche mère (dernière rangée) est incassable : personne ne tombe dans le vide.
+  a.socket.send(JSON.stringify({ t: "mineBlock", column: 12, row: 14, serial: 9 }));
+  await until(a, (m) => m.t === "mineRejected" && m.serial === 9);
+  // Casser un bloc posé ne fait rien d'autre : le drop porte le type posé.
+  a.socket.send(JSON.stringify({ t: "mineBlock", column: 13, row: -1, serial: 10 }));
+  const brokenPlaced = await until(b, (m) => m.t === "mineBlock" && m.dropId === aw.id + ":10");
+  assert.equal(brokenPlaced.type, "dirt");
 
   // Le premier joueur à toucher le drop le réclame : le serveur confirme à tous.
   b.socket.send(JSON.stringify({ t: "minePickup", dropId: aw.id + ":1" }));

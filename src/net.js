@@ -103,6 +103,9 @@ window.PixWorldNet = (() => {
       mineBlock(column, row, serial) {
         if (joined && mode === "online") send({ t: "mineBlock", column, row, serial });
       },
+      placeBlock(column, row, type, serial) {
+        if (joined && mode === "online") send({ t: "placeBlock", column, row, type, serial });
+      },
       pickupDrop(dropId) {
         if (joined && mode === "online") send({ t: "minePickup", dropId: String(dropId) });
       },

@@ -37,7 +37,18 @@ vm.runInNewContext(fs.readFileSync(path.join(ROOT, "src/mining.js"), "utf8"), mi
 const MINING = miningContext.window.PixWorldMining.constants;
 const MINING_COLUMNS = Math.ceil(WORLD_WIDTH / MINING.BLOCK_SIZE);
 const MINED_BLOCKS = new Set();
+const PLACED_BLOCKS = new Map(); // « col,row » -> type (blocs posés)
 const MINING_DROPS = new Map();
+const BLOCK_TYPES = new Set(["grass", "dirt", "stone"]);
+
+/** Une cellule est-elle solide, vue du serveur (pour la règle d'adjacence) ? */
+function serverSolidAt(column, row) {
+  if (row >= MINING.ROWS) return true; // plancher du monde
+  if (column < 0 || column >= MINING_COLUMNS || row < MINING.MIN_ROW) return false;
+  const key = column + "," + row;
+  if (PLACED_BLOCKS.has(key)) return true;
+  return row >= 0 && !MINED_BLOCKS.has(key);
+}
 const CHARACTER_IDS = new Set(["ninja", "archer", "samurai", "mage"]);
 
 const MIME = {
@@ -155,6 +166,10 @@ function broadcast(message, exceptId) {
 function miningSnapshot() {
   return {
     mined: Array.from(MINED_BLOCKS, (key) => key.split(",").map(Number)),
+    placed: Array.from(PLACED_BLOCKS.entries(), ([key, type]) => {
+      const [column, row] = key.split(",").map(Number);
+      return [column, row, type];
+    }),
     drops: Array.from(MINING_DROPS.values(), (drop) => ({ ...drop })),
   };
 }
@@ -298,19 +313,52 @@ function handleMessage(player, message) {
     const row = Number(message.row);
     const serial = Number(message.serial);
     if (!Number.isInteger(column) || column < 0 || column >= MINING_COLUMNS ||
-        !Number.isInteger(row) || row < 0 || row >= MINING.ROWS ||
+        !Number.isInteger(row) || row < MINING.MIN_ROW || row >= MINING.ROWS ||
         !Number.isSafeInteger(serial) || serial < 0 || serial > 2147483647) return;
 
     const key = column + "," + row;
     const dropId = player.id + ":" + serial;
-    if (MINED_BLOCKS.has(key) || MINING_DROPS.has(dropId)) {
+    // Roche mère incassable : le plancher du monde protège du vide.
+    if (row === MINING.ROWS - 1 || MINED_BLOCKS.has(key) || MINING_DROPS.has(dropId)) {
       send(player.socket, { t: "mineRejected", column, row, serial });
       return;
     }
-    MINED_BLOCKS.add(key);
-    const drop = { id: dropId, column, row, ownerId: player.id };
+    const placedType = PLACED_BLOCKS.get(key);
+    const type = placedType || MINING.LAYER_TYPES[row];
+    if (placedType) PLACED_BLOCKS.delete(key);
+    else MINED_BLOCKS.add(key);
+    const drop = { id: dropId, column, row, type, ownerId: player.id };
     MINING_DROPS.set(dropId, drop);
     broadcast({ t: "mineBlock", ...drop, dropId, serial });
+    return;
+  }
+
+  if (message.t === "placeBlock") {
+    if (!player.joined) return;
+    const column = Number(message.column);
+    const row = Number(message.row);
+    const type = String(message.type || "");
+    const serial = Number(message.serial);
+    const reject = () => send(player.socket, { t: "placeRejected", column, row, serial });
+    if (!Number.isInteger(column) || column < 0 || column >= MINING_COLUMNS ||
+        !Number.isInteger(row) || row < MINING.MIN_ROW || row >= MINING.ROWS ||
+        !Number.isSafeInteger(serial) || serial < 0 || serial > 2147483647 ||
+        !BLOCK_TYPES.has(type)) {
+      reject();
+      return;
+    }
+    const key = column + "," + row;
+    // Cellule vide + collée à au moins un bloc existant (jamais en l'air).
+    const empty = !PLACED_BLOCKS.has(key) && (row < 0 || MINED_BLOCKS.has(key));
+    const adjacent =
+      serverSolidAt(column - 1, row) || serverSolidAt(column + 1, row) ||
+      serverSolidAt(column, row - 1) || serverSolidAt(column, row + 1);
+    if (!empty || !adjacent) {
+      reject();
+      return;
+    }
+    PLACED_BLOCKS.set(key, type);
+    broadcast({ t: "placeBlock", column, row, type, ownerId: player.id, serial });
     return;
   }
 

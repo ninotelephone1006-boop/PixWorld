@@ -140,12 +140,37 @@
   // colonnes avec cette même constante, donc le client doit suivre.
   const BLOCK_SIZE = window.PixWorldMining.constants.BLOCK_SIZE;
   const mining = window.PixWorldMining.create({ worldWidth: WORLD_WIDTH, blockSize: BLOCK_SIZE });
+  // Textures de blocs sans couture (Kenney, CC0) : pour casser la répétition
+  // sans créer de raccord visible, chaque bloc est dessiné avec l'une des
+  // quatre orientations miroir de sa texture (les bords se recollent partout).
+  const miningBaseTextures = Object.create(null);
   const miningTextures = Object.create(null);
+  function refreshTextureVariants() {
+    Object.keys(window.PixWorldMining.BLOCKS).forEach((type) => {
+      const image = miningBaseTextures[type];
+      if (!image || !image.complete || image.naturalWidth === 0) return;
+      const make = (flipH, flipV) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d");
+        if (!context) return image;
+        context.imageSmoothingEnabled = false;
+        context.translate(flipH ? canvas.width : 0, flipV ? canvas.height : 0);
+        context.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+        context.drawImage(image, 0, 0);
+        return canvas;
+      };
+      miningTextures[type] = [image, make(true, false), make(false, true), make(true, true)];
+    });
+  }
   Object.keys(window.PixWorldMining.BLOCKS).forEach((type) => {
     const image = new Image();
     image.src = window.PixWorldMining.BLOCKS[type].image;
-    miningTextures[type] = image;
+    image.onload = refreshTextureVariants;
+    miningBaseTextures[type] = image;
   });
+  refreshTextureVariants();
   const miningBlockTypes = ["grass", "dirt", "stone"];
   const miningTime = window.PixWorldMining.constants.MINE_TIME;
   const scenery = window.PixWorldScenery.create({
@@ -195,6 +220,10 @@
   let currentBiome = null; // biome où se trouve le joueur (pour l'annonce)
   let lastTime = 0;
   let camX = 0;
+  // Caméra verticale : 0 en surface, elle descend quand le joueur mine vers
+  // le bas. En surface, seules deux rangées de blocs sont visibles sous le
+  // sol : la roche n'apparaît que lorsqu'on creuse.
+  let camY = 0;
   let sendTimer = 0;
   let menuMode = "start";
   let selectedCharacter = "ninja";
@@ -773,6 +802,29 @@
         if (item && message.collectorId === myId) awardMinedDrop(item);
         break;
       }
+      case "placeBlock": {
+        const column = Number(message.column);
+        const row = Number(message.row);
+        const type = message.type;
+        if (!Number.isInteger(column) || !Number.isInteger(row) || !window.PixWorldMining.BLOCKS[type]) break;
+        if (message.ownerId === myId) pendingPlacements.delete(Number(message.serial));
+        if (!mining.isPlaced(column, row)) {
+          const placedNow = mining.placeBlock(column, row, type);
+          if (placedNow && message.ownerId !== myId) placementFeedback(placedNow);
+        }
+        updateHotbar();
+        break;
+      }
+      case "placeRejected": {
+        const info = pendingPlacements.get(Number(message.serial));
+        pendingPlacements.delete(Number(message.serial));
+        if (info) {
+          mining.removePlaced(info.column, info.row);
+          mining.refundBlock(info.type);
+        }
+        updateHotbar();
+        break;
+      }
       case "join": {
         const isNew = addPeer(message.player);
         if (isNew && message.player) {
@@ -1051,10 +1103,13 @@
     canvas.height = Math.round(height * ratio);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    // Sur grand écran, les 15 couches occupent la partie basse sans être coupées.
-    groundY = Math.max(80, height - mining.totalHeight);
+    // La ligne de surface se place deux blocs au-dessus du bas de l'écran :
+    // on ne voit que deux couches de terrain (herbe + terre), jamais la roche,
+    // sauf à creuser — la caméra verticale descend alors avec le joueur.
+    groundY = Math.max(80, height - 2 * BLOCK_SIZE);
     player.x = clamp(player.x, 0, WORLD_WIDTH - player.width);
     if (player.grounded) player.y = groundAt(centerOf(player.x)) - player.height;
+    camY = Math.max(0, player.y + player.height - groundY);
     draw();
   }
 
@@ -1259,7 +1314,7 @@
   function currentMiningTarget() {
     if (!playing || !miningPointer.inside) return null;
     const worldX = miningPointer.x + camX - fx.shakeX;
-    const worldY = miningPointer.y - fx.shakeY;
+    const worldY = miningPointer.y + camY - fx.shakeY;
     return mining.blockAt(worldX, worldY, groundY);
   }
 
@@ -1308,6 +1363,82 @@
       networked: false,
     });
     if (broken) blockBreakFeedback(broken, false);
+  }
+
+  // ─────────────────────── Pose de blocs (clic droit) ───────────────────────
+  // Comme dans Minecraft : on pose contre un bloc existant (jamais en l'air),
+  // à portée de main, jamais à l'intérieur d'un joueur. Casser un bloc d'une
+  // tour ne fait rien d'autre : aucun bloc ne tombe, rien ne s'effondre.
+  const REACH = 5 * BLOCK_SIZE; // portée de pose / de minage
+  const pendingPlacements = new Map(); // serial -> { column, row, type }
+
+  function placementCellAt(pointerX, pointerY) {
+    const worldX = pointerX + camX - fx.shakeX;
+    const worldY = pointerY + camY - fx.shakeY;
+    return {
+      column: Math.floor(worldX / BLOCK_SIZE),
+      row: Math.floor((worldY - groundY) / BLOCK_SIZE),
+    };
+  }
+
+  function cellIntersectsEntity(column, row, x, y) {
+    const bx = column * BLOCK_SIZE;
+    const by = groundY + row * BLOCK_SIZE;
+    return (
+      bx < x + player.width &&
+      bx + BLOCK_SIZE > x &&
+      by < y + player.height &&
+      by + BLOCK_SIZE > y
+    );
+  }
+
+  function placementFeedback(block) {
+    fx.dust(block.x + BLOCK_SIZE / 2, groundY + block.row * BLOCK_SIZE + BLOCK_SIZE / 2, { count: 5 });
+    sfx("impactSpark", { volume: 0.32, pitch: 1.25 });
+  }
+
+  function tryPlaceBlock() {
+    if (!playing || player.deadTime !== 0 || !miningPointer.inside) return;
+    const { column, row } = placementCellAt(miningPointer.x, miningPointer.y);
+    const me = playerCenter();
+    const cellX = column * BLOCK_SIZE + BLOCK_SIZE / 2;
+    const cellY = groundY + row * BLOCK_SIZE + BLOCK_SIZE / 2;
+    if (Math.hypot(cellX - me.x, cellY - me.y) > REACH) return;
+    if (!mining.canPlaceAt(column, row)) return;
+
+    const type = miningBlockTypes[selectedHotbarSlot];
+    if ((mining.inventory()[type] || 0) <= 0) {
+      sfx("uiError", { volume: 0.4 });
+      return;
+    }
+    // Pas de bloc dans un joueur : on ne se enferme pas, ni les autres.
+    if (cellIntersectsEntity(column, row, player.x, player.y)) return;
+    let insidePeer = false;
+    others.forEach((peer) => {
+      if (cellIntersectsEntity(column, row, peer.rx, peer.ry)) insidePeer = true;
+    });
+    if (insidePeer) return;
+
+    const serial = miningSequence++;
+    const connected = net && net.mode === "online" && hasJoined && myId;
+    if (connected) {
+      // Optimiste : posé tout de suite, retiré si le serveur refuse.
+      if (!mining.spendBlock(type)) return;
+      const placedNow = mining.placeBlock(column, row, type);
+      pendingPlacements.set(serial, { column, row, type });
+      net.placeBlock(column, row, type, serial);
+      if (placedNow) placementFeedback(placedNow);
+      updateHotbar();
+      return;
+    }
+    if (!mining.spendBlock(type)) return;
+    const placedNow = mining.placeBlock(column, row, type);
+    if (!placedNow) {
+      mining.refundBlock(type);
+      return;
+    }
+    placementFeedback(placedNow);
+    updateHotbar();
   }
 
   function awardMinedDrop(drop) {
@@ -1476,18 +1607,25 @@
     player.velocityX = player.knockback;
     player.x = clamp(player.x + player.velocityX * delta, 0, WORLD_WIDTH - player.width);
     if (!player.grounded) {
-      const feetBefore = player.y + player.height;
       player.velocityY += 1900 * delta;
-      player.y += player.velocityY * delta;
-      const top = mining.landingTop(centerOf(player.x), feetBefore, player.y + player.height, groundY);
-      if (top !== null && player.velocityY >= 0) {
-        player.y = top - player.height;
+      const moved = mining.moveEntity(
+        { x: player.x, y: player.y, width: player.width, height: player.height },
+        0,
+        player.velocityY * delta,
+        groundY,
+      );
+      player.y = moved.y;
+      if (moved.grounded) {
         player.velocityY = 0;
         player.grounded = true;
-        fx.dust(centerOf(player.x), top, { count: 8 });
+        fx.dust(centerOf(player.x), player.y + player.height, { count: 8 });
         sfx("land", { volume: 0.6, pitch: 0.85 });
       }
+    } else if (!mining.standingOn(player.x, player.y, player.width, player.height, groundY)) {
+      player.grounded = false;
     }
+    const targetCamY = Math.max(0, player.y + player.height - groundY);
+    camY += (targetCamY - camY) * Math.min(1, delta * 8);
   }
 
   function updateLocalMovement(delta) {
@@ -1499,47 +1637,60 @@
     if (Math.abs(player.knockback) < 4) player.knockback = 0;
     player.velocityX = walk + player.knockback;
     if (direction !== 0 && !stunned) player.facing = direction;
-    player.x += player.velocityX * delta;
-    player.x = clamp(player.x, 0, WORLD_WIDTH - player.width);
 
     // Caméra qui suit le joueur, bornée au monde : parallaxe du décor.
     const target = clamp(player.x + player.width / 2 - width / 2, 0, Math.max(0, WORLD_WIDTH - width));
     camX += (target - camX) * Math.min(1, delta * 10);
 
     const cx = centerOf(player.x);
-    const feetBefore = player.y + player.height;
+    const wasGrounded = player.grounded;
     if (!player.grounded) {
       player.airTime += delta;
       player.velocityY += 1900 * delta;
-      player.y += player.velocityY * delta;
+    }
 
-      // Atterrissage sur le relief ou sur une plateforme traversée par le haut.
-      const top = mining.landingTop(cx, feetBefore, player.y + player.height, groundY);
-      if (top !== null && player.velocityY >= 0) {
-        player.y = top - player.height;
-        const impact = player.velocityY;
-        player.velocityY = 0;
-        player.grounded = true;
+    // Collisions réelles contre la grille de blocs (axe par axe, par petits
+    // pas) : impossible de traverser un mur ou de tomber dans le vide — le
+    // plancher du monde (roche mère) arrête toute chute.
+    const moved = mining.moveEntity(
+      { x: player.x, y: player.y, width: player.width, height: player.height },
+      player.velocityX * delta,
+      player.velocityY * delta,
+      groundY,
+    );
+    if (moved.hitWall) player.knockback = 0;
+    player.x = clamp(moved.x, 0, WORLD_WIDTH - player.width);
+    player.y = moved.y;
+    const impact = player.velocityY;
+    if (moved.grounded || moved.hitCeiling) player.velocityY = 0;
+    const supported =
+      moved.grounded ||
+      (player.velocityY >= 0 &&
+        mining.standingOn(player.x, player.y, player.width, player.height, groundY));
+    if (supported) {
+      if (!wasGrounded) {
         player.landingTime = 0.12;
         const me = playerCenter();
         const heavy = impact > 900;
-        fx.dust(me.x, top, { count: heavy ? 10 : 6 });
+        fx.dust(me.x, player.y + player.height, { count: heavy ? 10 : 6 });
         sfx("land", { volume: heavy ? 1 : 0.7, pitch: heavy ? 0.9 : 1 });
         if (heavy) fx.shake(2, 0.1);
-        player.airTime = 0;
       }
+      player.grounded = true;
+      player.velocityY = 0;
+      player.airTime = 0;
     } else {
-      // Au sol : on suit le relief (montées et descentes douces) ; si la
-      // surface se dérobe, le personnage tombe.
-      const top = mining.supportTop(cx, feetBefore, groundY, BLOCK_SIZE * 0.8);
-      if (top === null) {
-        player.grounded = false;
-        player.velocityY = 0;
-        player.airTime = 0;
-      } else {
-        player.y = top - player.height;
-      }
+      player.grounded = false;
     }
+
+    // Filet de sécurité : quoi qu'il arrive, on ne quitte jamais le monde.
+    if (player.y > groundY + mining.totalHeight + 400) respawn();
+
+    // Caméra verticale : elle ne descend que pour suivre le joueur sous la
+    // surface (minage), et garde deux rangées de blocs sous ses pieds.
+    const targetCamY = Math.max(0, player.y + player.height - groundY);
+    camY += (targetCamY - camY) * Math.min(1, delta * 8);
+    if (Math.abs(camY - targetCamY) < 0.5) camY = targetCamY;
 
     if (player.grounded && Math.abs(walk) > 0.5) {
       // Bruits de pas réguliers et petits nuages de poussière.
@@ -2316,21 +2467,27 @@
     ctx.save();
     ctx.translate(Math.round(fx.shakeX), Math.round(fx.shakeY));
 
-    // Décor des biomes : ciel, lointains, relief, puis props et plateformes.
-    const view = { width, height, camX, baseY: groundY, time: lastTime / 1000 };
+    // Décor des biomes : ciel et lointains fixes, puis le monde (terrain,
+    // héros, effets) décalé par la caméra verticale camY.
+    const view = { width, height, camX, camY, baseY: groundY, time: lastTime / 1000 };
     scenery.ensurePatterns(ctx);
     scenery.drawSky(ctx, width, height, camX, view.time);
     scenery.drawFarLayers(ctx, width, height, camX);
+    // Terrain, drops et cible de minage gèrent eux-mêmes camY (repère écran).
     mining.drawTerrain(ctx, view, miningTextures);
-    drawTufts();
-    scenery.drawProps(ctx, view);
-    scenery.drawPlatforms(ctx, view);
     mining.drawDrops(ctx, view, miningTextures);
     const miningTarget = currentMiningTarget();
     if (miningTarget) {
       const progress = miningPointer.down && miningTarget.key === miningTargetKey ? miningElapsed / miningTime : 0;
-      mining.drawTarget(ctx, miningTarget, progress, camX);
+      mining.drawTarget(ctx, miningTarget, progress, camX, camY);
     }
+
+    // Le reste du monde (herbes, héros, effets) en repère monde, décalé par camY.
+    ctx.save();
+    ctx.translate(0, -Math.round(camY));
+    drawTufts();
+    scenery.drawProps(ctx, view);
+    scenery.drawPlatforms(ctx, view);
 
     drawOthers();
 
@@ -2361,6 +2518,7 @@
     );
     drawProjectiles();
     fx.draw(ctx, camX);
+    ctx.restore(); // fin du décalage vertical du monde
 
     scenery.drawAmbient(ctx);
     ctx.restore();
@@ -2505,6 +2663,18 @@
   });
   window.addEventListener("pointercancel", resetMiningInput);
 
+  // Clic droit : poser le bloc sélectionné de la hotbar, façon Minecraft —
+  // uniquement contre un bloc existant, à portée, jamais en plein air.
+  window.addEventListener("contextmenu", (event) => {
+    if (event.target === canvas) event.preventDefault();
+  });
+  window.addEventListener("pointerdown", (event) => {
+    if (event.button !== 2 || !playing || event.target !== canvas) return;
+    event.preventDefault();
+    updateMiningPointer(event);
+    tryPlaceBlock();
+  });
+
   hotbarSlots.forEach((slot, index) => {
     slot.addEventListener("click", () => selectHotbar(index, true));
   });
@@ -2535,4 +2705,16 @@
   connect();
   openMenu("start");
   requestAnimationFrame(frame);
+
+  // Accroche de test « tête nue » (test/gameplay.test.js) : état minimal du
+  // joueur, de la caméra et du terrain, sans rien exposer d'autre.
+  window.PixWorldDebug = {
+    get player() {
+      return { x: player.x, y: player.y, grounded: player.grounded, dead: player.deadTime > 0 };
+    },
+    get camY() { return camY; },
+    get groundY() { return groundY; },
+    placed: () => mining.getPlaced(),
+    inventory: () => mining.inventory(),
+  };
 })();
