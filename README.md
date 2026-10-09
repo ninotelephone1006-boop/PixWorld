@@ -2,45 +2,49 @@
 
 Jeu de plateforme 2D en HTML Canvas, **jouable à plusieurs dans le navigateur**. Choisis ton héros dans l'écran titre, puis explore un niveau pixel art animé.
 
-Ouvre `index.html` dans un navigateur pour jouer seul, ou lance le serveur pour voir les autres joueurs en temps réel — depuis le même PC **ou depuis n'importe quel autre ordinateur du réseau** :
+## Jouer ensemble par le lien
 
-```bash
-npm start          # http://localhost:3000
-PORT=8080 npm start
+Ouvre le **lien public du jeu**, choisis ton héros et entre dans l’arène.
+Tous les joueurs de ce site se retrouvent automatiquement : autres PC, autres
+Wi-Fi, autres villes. Le bouton **Copier** partage ce même lien. Aucun champ IP,
+aucun choix de serveur, aucun repli trompeur limité aux onglets.
+
+### Mise en ligne (une fois, par le propriétaire du site)
+
+Un serveur public est indispensable, mais les joueurs n’ont rien à configurer.
+GitHub Pages et les autres hébergements purement statiques ne peuvent pas faire
+tourner ce serveur WebSocket.
+
+1. Dans Render, créer un **Blueprint** depuis ce dépôt et utiliser `render.yaml`.
+2. Valider le service Node (le plan `starter` indiqué est payant et évite la mise
+   en veille ; vérifier le tarif avant validation).
+3. Partager l’URL **HTTPS du service web**, pas l’URL GitHub Pages.
+
+Le service sert à la fois la page et `/ws` ; HTTPS devient automatiquement WSS.
+Render fournit le port via `PORT` et termine TLS. `/healthz` sert de sonde.
+Sur un autre hébergeur Node, lancer `npm ci && npm start`, avec un proxy HTTPS
+qui relaie aussi l’upgrade WebSocket `/ws`.
+**Garder une seule instance** : les 24 places de l’arène sont en mémoire.
+Plusieurs instances nécessiteraient un état partagé, non implémenté ici.
+Un redémarrage remet les connexions à zéro ; les clients se reconnectent.
+
+Cette configuration ne déploie rien à elle seule : la création du service reste
+à effectuer par le propriétaire du compte d’hébergement.
+
+### Développement local
+
+```sh
+npm ci
+npm start
+# http://localhost:3000
+npm test
 ```
 
-## Jouer à plusieurs depuis plusieurs PC
-
-Le PC qui lance `npm start` **héberge** la partie. Au démarrage, le serveur affiche les adresses à partager :
-
-```console
-PixWorld — http://localhost:3000 (websocket sur /ws)
-Pour rejoindre depuis un autre PC :
-  http://192.168.1.24:3000
-```
-
-Ensuite, trois façons de rejoindre — à choisir selon ce qui est le plus simple :
-
-| Depuis l'autre PC | Comment faire |
-| --- | --- |
-| **Ouvrir l'adresse du serveur** | Lance un navigateur sur `http://192.168.1.24:3000` : l'autre PC télécharge le jeu *et* se connecte. Rien à configurer. |
-| **Entrer l'adresse dans le menu** | Ouvre PixWorld comme tu veux (`index.html`, hébergement statique…) puis, dans l'écran titre, champ **« Rejoindre une partie »**, entre `192.168.1.24:3000` et clique sur **Rejoindre**. L'adresse est mémorisée pour la prochaine fois. |
-| **Suivre un lien tout prêt** | Ouvre `http://192.168.1.24:3000/?server=192.168.1.24:3000` : le paramètre `?server=` indique directement quel serveur rejoindre. |
-
-L'adresse acceptée tous les formats : `192.168.1.24`, `192.168.1.24:8080`, `http://192.168.1.24:3000`, `ws://192.168.1.24:3000/ws`. Sans précision, le port est celui de la page (ou 3000).
-
-Pendant la partie, l'écran titre affiche l'adresse à envoyer à tes amis (bouton **Copier**) : elle est fournie par le serveur lui-même (`GET /info`), qui liste ses adresses réseau.
-
-Quelques rappels utiles :
-
-- les deux PC doivent être sur le **même réseau** (même Wi-Fi, même box) ; au-delà, il faut ouvrir/rediriger le port (`3000` par défaut) sur la box ;
-- un pare-feu peut bloquer la connexion : autorise Node.js sur le réseau privé ;
-- pour héberger sur Internet, remplace l'adresse locale par l'adresse publique ou un tunnel (ngrok, Cloudflare Tunnel…) ;
-- en https, le navigateur refuse de joindre un serveur en clair : ouvre le jeu depuis le serveur lui-même (`http://<IP>:3000`) plutôt que depuis une page https.
+Un lien localhost ou privé n’est pas accessible depuis une autre ville.
 
 ## Écran titre et héros
 
-Le menu d'accueil apparaît dès l'ouverture du jeu. Choisis un personnage et un pseudo, puis sélectionne **Entrer dans l'arène**. Le champ **Rejoindre une partie** du même écran permet de viser le serveur hébergé par un autre PC (voir plus bas). Le nom et le héros choisi sont mémorisés dans le navigateur. En cours de partie, `Échap` ouvre le menu pause : tu peux reprendre, changer de héros ou revenir à l'écran titre.
+Le menu d'accueil apparaît dès l'ouverture du jeu. Choisis un personnage et un pseudo, puis sélectionne **Entrer dans l'arène**. Le bouton **Copier** permet de partager le lien du jeu. Le nom et le héros choisi sont mémorisés dans le navigateur. En cours de partie, `Échap` ouvre le menu pause : tu peux reprendre, changer de héros ou revenir à l'écran titre.
 
 Quatre combattants ont chacun **leur propre feuille de sprite** (plus aucune teinte de couleur n'est appliquée : chaque héros garde ses vraies couleurs) et leur propre attaque :
 
@@ -120,17 +124,15 @@ La liste des événements et de leurs variantes est décrite dans `src/sfx-libra
 - Si un joueur sort de l'écran, une **flèche à son nom** indique de quel côté il se trouve.
 - Le crayon `✎` de la liste rouvre le menu pour changer de pseudo ou de héros.
 
-### Trois modes, automatiques
+### Connexion automatique
 
-| Mode | Quand ? | Ce que ça permet |
-| --- | --- | --- |
-| **En ligne** | Le serveur Node répond (`npm start`) | Jouer à plusieurs depuis différentes machines / navigateurs (le serveur peut être sur un autre PC : voir plus haut) |
-| **Onglets** | Pas de serveur (page ouverte directement, hébergement statique…) | Se voir entre onglets d'un même navigateur |
-| **Solo** | Navigateur sans `BroadcastChannel` | Jouer seul |
+Le statut indique connexion, en ligne, reconnexion, arène pleine ou hors ligne.
+Les tentatives reprennent automatiquement, même si le service était indisponible
+à l’ouverture. Une coupure retire les anciens joueurs de l’écran. Aucun autre
+transport ne crée une arène séparée en silence.
 
-Le mode est indiqué en haut à droite. Si le serveur redémarre, le jeu retente automatiquement de se reconnecter avec un délai croissant.
-
-Quand la partie est hébergée ailleurs, le bandeau affiche l'adresse du serveur visé (`Connecté à 192.168.1.24:3000`) au lieu du simple « en ligne ».
+Le combat actuel reste simulé côté client : les attaques, la vie et les K.O.
+sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-triche.
 
 ## Commandes
 
@@ -154,10 +156,10 @@ Quand la partie est hébergée ailleurs, le bandeau affiche l'adresse du serveur
 - `src/audio.js` — lecture des effets sonores : banque de fichiers, pas d'herbe échantillonnés, froissement de l'herbe synthétisé, autres matières synthétisées en secours, spatialisation, volume et sourdine.
 - `src/sfx-library.js` — catalogue généré des sons (événement → variantes, sources d'origine et gain), écrit par `tools/build-sfx.mjs`.
 - `assets/sfx/` — les 199 Wave adaptés (CC0), 3 à 8 variantes par événement.
-- `src/net.js` — adresse du serveur à rejoindre (`resolveServerUrl`), WebSocket, repli sur `BroadcastChannel` et reconnexion.
+- `src/net.js` — WebSocket sur la même origine et reconnexion automatique.
 - `tools/make-sprites.py` — générateur (Pillow) des feuilles de sprites originales de Sora et Raiden.
 - `tools/build-sfx.mjs` — récupère les sons CC0 sur GitHub, les adapte (mono, 44,1 kHz, silences coupés, 0,8 s max) et régénère `assets/sfx/` + `src/sfx-library.js`.
-- `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz, sans conserver de données. Il écoute sur toutes les interfaces (les autres PC peuvent rejoindre), affiche ses adresses réseau au démarrage et les expose sur `GET /info`.
+- `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz, sans conserver de données. Il écoute sur toutes les interfaces et fournit `/healthz` pour le déploiement.
 
 Chaque client envoie sa position, son animation, son personnage, ses points de vie, son état de K.O. et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde est généré à partir d'une graine commune (environ 8 300 px de large) et partagé par tous. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné et un joueur muet pendant plus de 20 s est déconnecté.
 
@@ -167,7 +169,7 @@ Chaque client envoie sa position, son animation, son personnage, ses points de v
 npm test
 ```
 
-Les tests (sans dépendance) vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio — synthèse de chaque preset, lecture des pas d'herbe dédiés, décodage des fichiers et repli synthèse avec un faux navigateur (`test/audio.test.js`), l'intégrité et la correspondance des sources de la banque de sons (`test/sfx-bank.test.js`), le moteur d'effets visuels, brins compris (`test/effects.test.js`), le monde procédural — graine, biomes, marchabilité du relief, plateformes atteignables et atterrissages (`test/world.test.js`), le rendu des biomes sur un contexte factice (`test/scenery.test.js`), l'herbe interactive — pose des touffes, courbure et retour au repos, froissements espacés, brins occasionnels (`test/grass.test.js`) — et rejouent les transports en ligne et local, la reconnexion, l'adresse du serveur à rejoindre (`192.168.1.24`, `?server=…`, adresse mémorisée, changement de serveur en cours de partie) et la synchronisation des héros / attaques à l'aide de faux WebSocket et `BroadcastChannel` (`test/net.test.js`).
+Les tests (sans dépendance) vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio — synthèse de chaque preset, lecture des pas d'herbe dédiés, décodage des fichiers et repli synthèse avec un faux navigateur (`test/audio.test.js`), l'intégrité et la correspondance des sources de la banque de sons (`test/sfx-bank.test.js`), le moteur d'effets visuels, brins compris (`test/effects.test.js`), le monde procédural — graine, biomes, marchabilité du relief, plateformes atteignables et atterrissages (`test/world.test.js`), le rendu des biomes sur un contexte factice (`test/scenery.test.js`), l'herbe interactive — pose des touffes, courbure et retour au repos, froissements espacés, brins occasionnels (`test/grass.test.js`) — et vérifient la connexion automatique, la reconnexion, les erreurs et la synchronisation des héros / attaques (`test/net.test.js`).
 
 ## Sprites et décor
 

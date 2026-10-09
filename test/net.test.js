@@ -1,9 +1,9 @@
 /**
  * Tests de la couche réseau (src/net.js), sans dépendance : `npm test`.
  *
- * On exécute net.js dans un bac à sable avec un faux WebSocket et un faux
- * BroadcastChannel, ce qui permet de rejouer tous les cas : partie en ligne,
- * absence de serveur, reconnexion et mode « onglets ».
+ * On exécute net.js dans un bac à sable avec un faux WebSocket
+ * pour rejouer les cas : partie en ligne,
+ * absence de serveur, reconnexion, URL commune et arène pleine.
  */
 "use strict";
 
@@ -49,6 +49,7 @@ function makeBrowser(options) {
     open() {
       this.readyState = 1;
       if (this.onopen) this.onopen({});
+      this.onmessage({ data: JSON.stringify({ t: "welcome", id: "p1", players: [] }) });
     }
     /** Simule un échec de connexion (serveur absent). */
     fail() {
@@ -79,7 +80,6 @@ function makeBrowser(options) {
     clearInterval: (id) => clearInterval(id),
     location: { protocol: "http:", host: "localhost:3000", search: "" },
     WebSocket: options.noServer ? undefined : FakeWebSocket,
-    BroadcastChannel: options.channelClass,
   };
   sandbox.window = sandbox;
   sandbox.addEventListener = () => {};
@@ -99,31 +99,6 @@ function createStorage(initial) {
     removeItem: (key) => values.delete(key),
     values,
   };
-}
-
-/** Faux BroadcastChannel partagé entre plusieurs « onglets » du test. */
-function createChannelBus() {
-  const channels = [];
-  class FakeBroadcastChannel {
-    constructor(name) {
-      this.name = name;
-      this.onmessage = null;
-      channels.push(this);
-    }
-    postMessage(data) {
-      channels.forEach((other) => {
-        if (other !== this && other.name === this.name && other.onmessage) {
-          // Copie profonde : le vrai canal clone les données.
-          other.onmessage({ data: JSON.parse(JSON.stringify(data)) });
-        }
-      });
-    }
-    close() {
-      const index = channels.indexOf(this);
-      if (index >= 0) channels.splice(index, 1);
-    }
-  }
-  return FakeBroadcastChannel;
 }
 
 async function testOnlineGame() {
@@ -159,6 +134,7 @@ async function testOnlineGame() {
   socket.onmessage({ data: JSON.stringify({ t: "snapshot", p: [{ id: "p2", x: 400, gap: 30, f: -1, vx: 0, vy: 0, g: false, a: 0, hp: 55 }] }) });
   socket.onmessage({ data: JSON.stringify({ t: "leave", id: "p2" }) });
 
+  events.shift(); // premier welcome simulé à l’ouverture
   const types = events.map((m) => m.t).join(",");
   check("les joueurs déjà présents sont annoncés", types === "welcome,snapshot,leave", types);
   check("le joueur distant garde son personnage", events[0].players[0].name === "Bob" && events[0].players[0].character === "mage");
@@ -168,13 +144,18 @@ async function testOnlineGame() {
 }
 
 async function testNoServer() {
-  console.log("Sans serveur, repli sur les onglets du navigateur");
-  const browser = makeBrowser({ channelClass: createChannelBus() });
-  const net = browser.sandbox.PixWorldNet.connect({ name: "Alice", onEvent: () => {} });
+  const browser = makeBrowser();
+  const net = browser.sandbox.PixWorldNet.connect({ onEvent: () => {} });
+  net.join("Alice", "mage");
   browser.sockets[0].fail();
-  check("le mode bascule sur « local »", net.mode === "local", net.mode);
-  net.join("Alice");
+  check("pas de faux multijoueur local", net.mode === "reconnect");
+  await wait(1700);
+  check("reconnexion même si la première connexion échoue", browser.sockets.length === 2);
+  browser.sockets[1].open();
+  check("rejoint automatiquement après le premier échec", browser.sockets[1].sent[0].name === "Alice");
   net.close();
+  await wait(1700);
+  check("close annule les tentatives", browser.sockets.length === 2);
 }
 
 async function testReconnect() {
@@ -209,130 +190,25 @@ async function testReconnect() {
   net.close();
 }
 
-async function testLocalTabs() {
-  console.log("Mode local : deux onglets se voient");
-  const bus = createChannelBus();
-  const eventsA = [];
-  const eventsB = [];
-  const a = makeBrowser({ noServer: true, channelClass: bus });
-  const b = makeBrowser({ noServer: true, channelClass: bus });
-
-  const netA = a.sandbox.PixWorldNet.connect({ name: "Alice", character: "archer", onEvent: (m) => eventsA.push(m) });
-  const netB = b.sandbox.PixWorldNet.connect({ name: "Bob", character: "mage", onEvent: (m) => eventsB.push(m) });
-
-  netA.join("Alice", "archer");
-  netB.join("Bob", "mage");
-
-  netB.sendState({ x: 500, gap: 12, f: -1, vx: -340, vy: 0, g: true, a: 0.3, c: "mage", n: 1, hp: 42 });
-  await wait(120);
-
-  const joinOnA = eventsA.filter((m) => m.t === "join");
-  check("Alice voit Bob avec son personnage", joinOnA.length === 1 && joinOnA[0].player.name === "Bob" && joinOnA[0].player.character === "mage", JSON.stringify(joinOnA));
-
-  const snapshotOnA = eventsA.filter((m) => m.t === "snapshot").pop();
-  check("Alice reçoit la position et l'attaque de Bob", snapshotOnA && snapshotOnA.p[0].x === 500 && snapshotOnA.p[0].gap === 12 && snapshotOnA.p[0].c === "mage" && snapshotOnA.p[0].n === 1, JSON.stringify(snapshotOnA));
-  check("Alice reçoit la vie de Bob", snapshotOnA && snapshotOnA.p[0].hp === 42, JSON.stringify(snapshotOnA));
-
-  const joinOnB = eventsB.filter((m) => m.t === "join");
-  check("Bob voit Alice", joinOnB.length === 1 && joinOnB[0].player.name === "Alice" && joinOnB[0].player.character === "archer", JSON.stringify(joinOnB));
-
-  netA.close();
-  netB.close();
-}
-
-/**
- * Rejoindre la partie depuis un autre PC : l'adresse du serveur peut être
- * saisie dans le menu, passée en paramètre d'URL ou mémorisée.
- */
-async function testServerAddress() {
-  console.log("Adresse du serveur à rejoindre");
-  const browser = makeBrowser();
+async function testAddressAndFull() {
+  const browser = makeBrowser({ storage: createStorage({ "pixworld.server": "192.168.1.8" }) });
+  browser.sandbox.location = { protocol: "https:", host: "jeu.example", search: "?server=other.example" };
   const api = browser.sandbox.PixWorldNet;
-
-  const at = (raw, loc) => {
-    browser.sandbox.location = loc || { protocol: "http:", host: "localhost:3000", search: "" };
-    return api.resolveServerUrl(raw);
-  };
-
-  check("sans adresse, on vise le serveur de la page", at().url === "ws://localhost:3000/ws", at().url);
-
-  // Tous les formats acceptés, pour coller à ce qu'un joueur peut taper.
-  const formats = [
-    ["192.168.1.24", "ws://192.168.1.24:3000/ws"],
-    ["192.168.1.24:8080", "ws://192.168.1.24:8080/ws"],
-    ["http://192.168.1.24:8080", "ws://192.168.1.24:8080/ws"],
-    ["http://192.168.1.24/", "ws://192.168.1.24:3000/ws"],
-    ["ws://10.0.0.7:4000/ws", "ws://10.0.0.7:4000/ws"],
-    ["wss://pixworld.example:443/ws", "wss://pixworld.example:443/ws"],
-    ["  192.168.1.24:3000  ", "ws://192.168.1.24:3000/ws"],
-  ];
-  formats.forEach(([input, expected]) => {
-    check("« " + input + " » devient " + expected, at(input).url === expected, at(input).url);
-  });
-
-  check("l'adresse à partager est en http", at("192.168.1.24").httpUrl === "http://192.168.1.24:3000", at("192.168.1.24").httpUrl);
-  check("l'adresse saisie est signalée comme distante", at("192.168.1.24").remote === true);
-  check("le serveur de la page n'est pas distant", at().remote === false);
-
-  // Page servie en https : on chiffre, sauf vers le réseau local.
-  const secure = { protocol: "https:", host: "jeu.example", search: "" };
-  check("page https, adresse publique → wss", at("pixworld.example:3000", secure).url === "wss://pixworld.example:3000/ws", at("pixworld.example:3000", secure).url);
-  check("page https, PC du salon → ws", at("192.168.1.24", secure).url === "ws://192.168.1.24:3000/ws");
-  check("le contenu mixte est détecté", at("192.168.1.24", secure).mixedContent === true);
-  check("vers localhost, pas de blocage", at("localhost:3000", secure).mixedContent === false);
-  check("page https par défaut → wss", at(null, secure).url === "wss://jeu.example/ws", at(null, secure).url);
-
-  // Page ouverte en file:// : rien à deviner, sauf si une adresse est donnée.
-  const file = { protocol: "file:", host: "", search: "" };
-  check("fichier local sans adresse : aucun serveur", at(null, file) === null);
-  check("fichier local avec adresse : on l'utilise", at("192.168.1.24", file).url === "ws://192.168.1.24:3000/ws");
-
-  // Lien tout prêt : ?server=192.168.1.24:3000
-  const invited = { protocol: "http:", host: "localhost:3000", search: "?server=10.0.0.5%3A3000" };
-  check("le paramètre ?server= est utilisé", at(null, invited).url === "ws://10.0.0.5:3000/ws", at(null, invited).url);
-
-  // Adresse mémorisée lors d'une partie précédente.
-  const remembered = makeBrowser({ storage: createStorage({ "pixworld.server": "192.168.1.9:3000" }) });
-  check(
-    "l'adresse mémorisée est réutilisée",
-    remembered.sandbox.PixWorldNet.resolveServerUrl().url === "ws://192.168.1.9:3000/ws",
-    remembered.sandbox.PixWorldNet.resolveServerUrl().url,
-  );
-}
-
-async function testJoinOtherComputer() {
-  console.log("Changer de serveur en cours de partie");
-  const storage = createStorage();
-  const browser = makeBrowser({ storage });
-  const net = browser.sandbox.PixWorldNet.connect({ name: "Alice", character: "ninja", onEvent: () => {} });
-
-  check("la première connexion vise la page", browser.sockets[0].url === "ws://localhost:3000/ws", browser.sockets[0].url);
-
-  net.useServer("192.168.1.24");
-  check("une connexion vers l'autre PC est ouverte", browser.sockets.length === 2, "nb sockets = " + browser.sockets.length);
-  check("elle vise bien l'autre PC", browser.sockets[1].url === "ws://192.168.1.24:3000/ws", browser.sockets[1].url);
-  check("le serveur visé est exposé au jeu", net.server === "ws://192.168.1.24:3000/ws", net.server);
-  check("l'adresse est mémorisée", storage.getItem("pixworld.server") === "192.168.1.24", storage.getItem("pixworld.server"));
-
-  net.useServer("");
-  check("vider l'adresse revient au serveur de la page", browser.sockets[2] && browser.sockets[2].url === "ws://localhost:3000/ws");
-  check("l'adresse mémorisée est oubliée", storage.getItem("pixworld.server") === null);
+  check("HTTPS et ancienne adresse ignorée", api.resolveServerUrl().url === "wss://jeu.example/ws");
+  const net = api.connect({ onEvent: () => {} });
+  browser.sockets[0].readyState = 1;
+  browser.sockets[0].onmessage({ data: '{"t":"full"}' });
+  check("arène pleine sans fausse connexion", net.mode === "full");
   net.close();
-
-  // Adresse fournie directement à la connexion (option `server`).
-  const direct = makeBrowser();
-  const guest = direct.sandbox.PixWorldNet.connect({ name: "Bob", server: "10.0.0.3:8080", onEvent: () => {} });
-  check("l'option server est honorée", direct.sockets[0].url === "ws://10.0.0.3:8080/ws", direct.sockets[0].url);
-  guest.close();
+  browser.sandbox.location = { protocol: "file:", host: "" };
+  const local = api.connect({ onEvent: () => {} });
+  check("fichier local explicitement indisponible", local.mode === "unavailable");
+  local.close();
 }
-
 (async () => {
   await testOnlineGame();
   await testNoServer();
   await testReconnect();
-  await testLocalTabs();
-  await testServerAddress();
-  await testJoinOtherComputer();
-  console.log(failures ? "\n" + failures + " test(s) en échec" : "\nTous les tests passent");
-  process.exit(failures ? 1 : 0);
+  await testAddressAndFull();
+  process.exitCode = failures ? 1 : 0;
 })();

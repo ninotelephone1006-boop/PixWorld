@@ -17,8 +17,7 @@
  * graine commune à tous les joueurs. Le rendu des biomes est dans
  * src/scenery.js.
  *
- * Le script reste utilisable sans serveur (solo, ou entre onglets d'un même
- * navigateur) : voir src/net.js pour les détails des transports.
+ * Tous les joueurs rejoignent le serveur WebSocket du site : voir src/net.js.
  */
 (() => {
   "use strict";
@@ -42,8 +41,6 @@
   const menuVolume = document.querySelector("#menu-volume");
   const menuVolumeValue = document.querySelector("#menu-volume-value");
   const menuMute = document.querySelector("#menu-mute");
-  const menuServerInput = document.querySelector("#menu-server-input");
-  const menuServerApply = document.querySelector("#menu-server-apply");
   const menuServerShare = document.querySelector("#menu-server-share");
   const menuServerAddress = document.querySelector("#menu-server-address");
   const menuServerCopy = document.querySelector("#menu-server-copy");
@@ -73,7 +70,6 @@
 
   const STORAGE_NAME = "pixworld.name";
   const STORAGE_CHARACTER = "pixworld.character";
-  const STORAGE_SERVER = "pixworld.server"; // adresse du serveur à rejoindre
   const FONT_STACK = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 
   // Points de vie : barre au-dessus de chaque joueur, dégâts des attaques.
@@ -375,97 +371,19 @@
   }
 
   function describeMode(mode) {
-    if (mode === "online") return { label: "en ligne", tone: "online", text: "Connecté au serveur : joue avec tes amis." };
-    if (mode === "local") return { label: "onglets", tone: "local", text: "Mode local : ouvre un autre onglet pour jouer à plusieurs." };
-    if (mode === "reconnect") return { label: "reconnexion", tone: "local", text: "Connexion perdue, nouvelle tentative…" };
-    return { label: "solo", tone: "solo", text: "Mode solo : lance npm start pour jouer en ligne." };
+    if (mode === "online") return { label: "en ligne", tone: "online", text: "Tu es dans l’arène commune. Invite tes amis avec le lien du jeu !" };
+    if (mode === "reconnect") return { label: "reconnexion", tone: "local", text: "Arène indisponible, nouvelle tentative automatique…" };
+    if (mode === "full") return { label: "arène pleine", tone: "local", text: "L’arène est pleine. Nouvelle tentative automatique…" };
+    if (mode === "unavailable") return { label: "hors ligne", tone: "solo", text: "Ouvre le lien du jeu hébergé pour rejoindre les autres joueurs." };
+    return { label: "connexion…", tone: "local", text: "Connexion à l’arène commune…" };
   }
 
-  /**
-   * Message du menu selon le mode et le serveur visé : on précise l'adresse
-   * quand on joue sur un autre PC, et on prévient si le navigateur bloque
-   * la connexion (page en https vers un serveur en clair).
-   */
-  function serverStatusText(mode, info) {
-    const target = net ? net.serverInfo : null;
-    if (!target) return info.text;
-    if (target.mixedContent) {
-      return "Page en https : le navigateur bloque " + target.display + ". Ouvre plutôt " + target.httpUrl + " depuis l'autre PC.";
-    }
-    if (mode === "online" && target.remote) {
-      return "Connecté à " + target.display + " : joue avec tes amis.";
-    }
-    return info.text;
-  }
-
-  /** Adresses du serveur à partager (remplies par /info, voir refreshServerShare). */
-  let shareAddresses = null;
-  let shareTarget = null; // serveur pour lequel l'affichage a déjà été préparé
-
-  /**
-   * Affiche l'adresse à donner aux autres joueurs. Quand on héberge la partie
-   * (serveur de la page), on interroge /info : il renvoie les adresses du
-   * réseau local. Sinon on rappelle simplement l'adresse visée.
-   */
   function refreshServerShare() {
-    if (!net || !menuServerShare) return;
-    const target = net.serverInfo;
-    const key = target ? target.url : "";
-    if (shareTarget === key) return; // déjà à jour pour ce serveur
-    shareTarget = key;
-
-    if (!target) {
-      shareAddresses = null;
-      menuServerShare.hidden = true;
-      setServerHint(
-        "Aucun serveur connu : lance npm start sur un PC, puis entre son adresse ici (par exemple 192.168.1.24:3000).",
-      );
-      return;
-    }
-
-    if (target.remote) {
-      shareAddresses = null;
-      menuServerShare.hidden = true;
-      setServerHint(
-        target.mixedContent
-          ? "Page en https : le navigateur refuse de joindre " + target.display + " en clair. Ouvre plutôt " + target.httpUrl + "."
-          : "Partie hébergée sur " + target.display + " : entre la même adresse sur les autres PC pour vous retrouver.",
-      );
-      return;
-    }
-
-    // Serveur de la page : ses adresses réseau sont faites pour être partagées.
-    fetch(target.httpUrl + "/info", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (shareTarget !== key) return; // le joueur a changé de serveur entre-temps
-        const addresses = data && Array.isArray(data.addresses) ? data.addresses.filter(Boolean) : [];
-        if (!addresses.length) {
-          shareAddresses = null;
-          menuServerShare.hidden = true;
-          setServerHint("Donne cette adresse à tes amis : " + target.httpUrl + " (depuis le même réseau Wi-Fi).");
-          return;
-        }
-        shareAddresses = addresses;
-        menuServerAddress.textContent = addresses[0];
-        menuServerAddress.title = addresses.join(" · ");
-        menuServerShare.hidden = false;
-        setServerHint(
-          addresses.length > 1
-            ? "Adresse à envoyer à tes amis (même réseau Wi-Fi) — " + addresses.length + " adresses disponibles."
-            : "Adresse à envoyer à tes amis : ils ouvrent ce lien depuis l'autre PC pour te rejoindre.",
-        );
-      })
-      .catch(() => {
-        if (shareTarget !== key) return;
-        shareAddresses = null;
-        menuServerShare.hidden = true;
-        setServerHint("Donne cette adresse à tes amis : " + target.httpUrl + " (depuis le même réseau Wi-Fi).");
-      });
-  }
-
-  function setServerHint(text) {
-    if (menuServerHint) menuServerHint.textContent = text;
+    const target = net && net.serverInfo;
+    if (!menuServerShare) return;
+    menuServerShare.hidden = !target;
+    if (target) menuServerAddress.textContent = target.httpUrl + "/";
+    if (menuServerHint) menuServerHint.textContent = "Partage le lien du jeu : tes amis rejoignent la même arène, sans configuration. Le site doit être accessible sur Internet pour jouer depuis des réseaux différents.";
   }
 
   /** Copie l'adresse à partager dans le presse-papiers. */
@@ -504,21 +422,6 @@
     }
   }
 
-  /** Applique l'adresse saisie : on mémorise puis on se reconnecte dessus. */
-  function applyServerChoice() {
-    const value = menuServerInput ? menuServerInput.value.trim() : "";
-    remember(STORAGE_SERVER, value);
-    if (!net) return;
-    others.clear();
-    myId = null;
-    net.useServer(value);
-    panelDirty = true;
-    renderPanel();
-    refreshServerShare();
-    toast(value ? "Connexion à " + value + "…" : "Retour sur ce PC", true);
-    sfx("uiSelect", { volume: 0.7 });
-  }
-
   let lastMode = null;
   function applyMode(mode) {
     const info = describeMode(mode);
@@ -526,8 +429,8 @@
     playersPanel.dataset.mode = mode;
     playersMode.textContent = info.label;
     playersMode.title = target ? "Serveur : " + target.display : "";
-    if (!playing) setStatus(serverStatusText(mode, info), info.tone);
-    if (mode === "online" && !shareAddresses) refreshServerShare();
+    if (!playing) setStatus(info.text, info.tone);
+
     if (lastMode === "reconnect" && mode === "online") {
       sfx("connected");
       toast("Connexion rétablie", true);
@@ -752,20 +655,7 @@
     openMenu("pause");
   });
   menuNameInput.addEventListener("input", () => sfx("uiType", { volume: 0.8 }));
-  if (menuServerApply) menuServerApply.addEventListener("click", applyServerChoice);
   if (menuServerCopy) menuServerCopy.addEventListener("click", copyServerAddress);
-  if (menuServerInput) {
-    // Entrée dans le champ d'adresse : on se connecte au lieu de lancer la partie.
-    menuServerInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === "NumpadEnter") {
-        event.preventDefault();
-        applyServerChoice();
-      }
-    });
-  }
-  [menuServerApply, menuServerCopy].forEach((button) => {
-    if (button) button.addEventListener("pointerenter", () => sfx("uiHover", { volume: 0.5 }));
-  });
   [menuClose, menuHome, playersRename, menuForm.querySelector(".menu-primary")].forEach((button) => {
     if (button) button.addEventListener("pointerenter", () => sfx("uiHover", { volume: 0.5 }));
   });
@@ -1010,9 +900,6 @@
     net = window.PixWorldNet.connect({
       name: identity.name,
       character: identity.character,
-      // Adresse mémorisée (ou paramètre ?server=…) : elle permet de rejoindre
-      // la partie hébergée par un autre PC.
-      server: stored(STORAGE_SERVER, ""),
       onEvent: handleNetworkMessage,
       onMode: applyMode,
     });
@@ -2386,7 +2273,6 @@
   selectedCharacter = identity.character;
 
   // Adresse du serveur saisie lors d'une partie précédente (vide = ce PC).
-  if (menuServerInput) menuServerInput.value = stored(STORAGE_SERVER, "");
 
   buildCharacterCards();
   updateSoundButtons();

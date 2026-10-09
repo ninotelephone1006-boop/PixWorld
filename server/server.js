@@ -9,14 +9,14 @@
  * donnée n'est conservée après la déconnexion.
  *
  * Il écoute sur toutes les interfaces : les autres PC du réseau (Wi-Fi,
- * Ethernet…) peuvent donc rejoindre la partie. Les adresses à partager sont
- * affichées au démarrage et servies par GET /info.
+ * Ethernet…) peuvent donc rejoindre la partie. En production, le service
+ * public HTTPS héberge le jeu et relaie les WebSockets sur la même origine.
  */
 "use strict";
 
 const http = require("http");
 const fs = require("fs");
-const os = require("os");
+const vm = require("vm");
 const path = require("path");
 const crypto = require("crypto");
 
@@ -29,7 +29,9 @@ const MAX_PLAYERS = 24;
 const MAX_MESSAGE_BYTES = 4096;
 const MAX_MESSAGES_PER_SECOND = 80;
 const IDLE_TIMEOUT_MS = 20000;
-const WORLD_WIDTH = 2600;
+const worldContext = { window: {} };
+vm.runInNewContext(fs.readFileSync(path.join(ROOT, "src/world.js"), "utf8"), worldContext);
+const WORLD_WIDTH = worldContext.window.PixWorldWorld.create("pixworld").width;
 const CHARACTER_IDS = new Set(["ninja", "archer", "samurai", "mage"]);
 
 const MIME = {
@@ -51,24 +53,6 @@ const MIME = {
   ".md": "text/markdown; charset=utf-8",
 };
 
-/**
- * Adresses du réseau local à donner aux autres joueurs : celle-ci sert autant
- * à l'affichage du démarrage qu'à l'endpoint /info (le menu les montre pour
- * pouvoir les copier).
- */
-function localAddresses() {
-  const addresses = [];
-  const interfaces = os.networkInterfaces();
-  Object.keys(interfaces).forEach((name) => {
-    (interfaces[name] || []).forEach((entry) => {
-      if (!entry || entry.internal) return;
-      if (entry.family !== "IPv4" && entry.family !== 4) return;
-      addresses.push("http://" + entry.address + ":" + PORT);
-    });
-  });
-  return addresses;
-}
-
 // ───────────────────────────── Fichiers statiques ─────────────────────────────
 
 const server = http.createServer((req, res) => {
@@ -89,26 +73,19 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Adresses à partager pour rejoindre la partie depuis un autre PC.
-  // Accessible en cross-origin : un client hébergé ailleurs (page statique,
-  // autre machine…) peut afficher la liste sans être bloqué par le CORS.
-  if (pathname === "/info") {
-    const roster = Array.from(players.values()).filter((p) => p.joined);
-    res.writeHead(200, {
-      "content-type": MIME[".json"],
-      "cache-control": "no-store",
-      "access-control-allow-origin": "*",
-    });
-    res.end(JSON.stringify({
-      port: PORT,
-      online: roster.length,
-      players: roster.map((p) => ({ name: p.name, character: p.character })),
-      addresses: localAddresses(),
-    }));
+  if (pathname === "/healthz") {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("ok");
     return;
   }
 
   if (pathname === "/") pathname = "/index.html";
+
+  // Ne jamais exposer .git, les tests ou les fichiers de configuration.
+  if (pathname !== "/index.html" && !/^\/(src|assets)\//.test(pathname)) {
+    res.writeHead(404).end("Not found");
+    return;
+  }
 
   // On refuse toute sortie du dossier du projet (../ etc.).
   const filePath = path.join(ROOT, path.normalize(pathname));
@@ -171,7 +148,7 @@ function broadcast(message, exceptId) {
 
 // ───────────────────────── WebSocket : handshake (RFC 6455) ─────────────────────────
 
-const WS_GUID = "258EAFA5-E914-47DA-95CA-5AB0DC85B11C";
+const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 server.on("upgrade", (req, socket) => {
   let pathname = "";
@@ -442,14 +419,4 @@ function createFrameHandler(player) {
 
 server.listen(PORT, HOST, () => {
   console.log("PixWorld — http://localhost:" + PORT + " (websocket sur /ws)");
-  const addresses = localAddresses();
-  if (HOST === "127.0.0.1" || HOST === "localhost" || HOST === "::1") {
-    console.log("Écoute limitée à cette machine (" + HOST + ") : les autres PC ne peuvent pas rejoindre.");
-    console.log("Relance avec HOST=0.0.0.0 npm start pour ouvrir la partie au réseau.");
-  } else if (addresses.length) {
-    console.log("Pour rejoindre depuis un autre PC :");
-    addresses.forEach((address) => console.log("  " + address));
-  } else {
-    console.log("Aucune adresse réseau trouvée : vérifie la connexion Wi-Fi / Ethernet.");
-  }
 });
