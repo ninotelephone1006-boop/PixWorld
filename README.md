@@ -67,6 +67,21 @@ Chaque joueur porte une **barre de vie** au-dessus de son personnage (et une pet
 
 Chaque client gère ses propres points de vie et les transmet aux autres 20 fois par seconde, avec un drapeau de K.O. pour que tout le monde voie l'animation. Les impacts de tes attaques sur les autres sont affichés immédiatement (étincelles, anneaux, son) ; les points de vie qui en découlent arrivent par le réseau.
 
+## Monde procédural et biomes
+
+Le niveau n'est plus un simple plat : il est **généré à partir d'une graine** (`src/world.js`). Tous les joueurs partagent la même graine, donc voient le même relief, les mêmes plateformes et le même décor, sans rien échanger de plus sur le réseau.
+
+- **Quatre biomes**, disposés en bandes le long du monde (environ 8 300 px au total) : la **prairie** du départ, puis trois biomes dans un ordre propre à la graine :
+  - **Dunes dorées** — sable, cactus, arbres morts, ruines de grès, soleil brûlant et particules de sable qui filent ;
+  - **Taïga gelée** — pins enneigés, congères, stalactites de glace, neige qui tombe ;
+  - **Terres de cendre** — roche basaltique aux fissures incandescentes, mares de lave, cheminées qui fument, braises qui montent.
+- **Relief** : des collines plus ou moins hautes selon le biome, qui se fondent doucement d'un biome à l'autre. Le relief est toujours franchissable à pied.
+- **Plateformes flottantes** : on les atteint en sautant, on se pose dessus par le haut et on les traverse par-dessous.
+- **Annonce** : entrer dans un nouveau biome affiche son nom et sa description.
+- **Herbe interactive** : elle ne se trouve que dans la prairie ; ailleurs, personne ne la plie.
+
+Le rendu est dans `src/scenery.js` : les textures de sol (corps de terre, sable, neige, basalte) sont **peintes à la volée** sur de petites toiles, sans image à télécharger ; le ciel est en dégradé avec soleil et halo ; des couches lointaines en silhouettes défilent en parallaxe ; le relief porte une surface propre à son biome (herbe, congères, cendre) ; des particules d'ambiance et un voile de couleur complètent l'ambiance. La prairie garde ses décors d'origine (Sunny Land) fondus avec le reste.
+
 ## Herbe interactive
 
 Les touffes d'herbe posées sur le sol réagissent au passage des personnages, le tien comme celui des autres joueurs :
@@ -75,7 +90,7 @@ Les touffes d'herbe posées sur le sol réagissent au passage des personnages, l
 - **elles font du bruit** : un froissement court, plus discret à faible allure, et spatialisé pour les joueurs distants ;
 - **parfois, quelques brins s'envolent** : environ un froissement sur trois s'accompagne de petites feuilles projetées dans le sens de la marche.
 
-Le niveau compte six touffes au sol. L'herbe du premier plan, au bas de l'écran, reste décorative. Sauter au-dessus d'une touffe ne la fait pas bouger, et une marche trop lente ne produit ni son ni brin. Au repos, le rendu est identique à celui du décor d'origine. La logique est dans `src/grass.js`, séparée du dessin et du son.
+Les touffes sont posées sur le relief de la prairie. L'herbe du premier plan, au bas de l'écran, reste décorative. Sauter au-dessus d'une touffe ne la fait pas bouger, et une marche trop lente ne produit ni son ni brin. Au repos, le rendu est identique à celui du décor d'origine. La logique est dans `src/grass.js`, séparée du dessin et du son.
 
 ## Effets sonores
 
@@ -133,6 +148,8 @@ Quand la partie est hébergée ailleurs, le bandeau affiche l'adresse du serveur
 - `src/characters.js` — catalogue des combattants : feuille de sprite, réglages de combat (dégâts, recul, délai du projectile) et sons de chaque héros.
 - `src/game.js` — boucle de jeu, spritesheets, barres de vie, combat (recul, K.O., combo), effets d'attaque, interpolation des joueurs distants et touffes d'herbe du sol.
 - `src/effects.js` — particules (dont les brins d'herbe), chiffres de dégâts, ondes de choc, secousses de caméra, flashs et vignette.
+- `src/world.js` — monde procédural : graine, biomes en bandes, relief, plateformes, décor placé et collisions (atterrissage, appui sur le relief).
+- `src/scenery.js` — rendu des biomes : textures de sol peintes à la volée, ciels, couches lointaines, surfaces (herbe, neige, cendre), décor, plateformes et particules d'ambiance.
 - `src/grass.js` — herbe interactive : ressort de chaque touffe du sol, froissements et brins, calculés sans dessin ni son (`window.PixWorldGrass`).
 - `src/audio.js` — lecture des effets sonores : banque de fichiers, pas d'herbe échantillonnés, froissement de l'herbe synthétisé, autres matières synthétisées en secours, spatialisation, volume et sourdine.
 - `src/sfx-library.js` — catalogue généré des sons (événement → variantes, sources d'origine et gain), écrit par `tools/build-sfx.mjs`.
@@ -142,7 +159,7 @@ Quand la partie est hébergée ailleurs, le bandeau affiche l'adresse du serveur
 - `tools/build-sfx.mjs` — récupère les sons CC0 sur GitHub, les adapte (mono, 44,1 kHz, silences coupés, 0,8 s max) et régénère `assets/sfx/` + `src/sfx-library.js`.
 - `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz, sans conserver de données. Il écoute sur toutes les interfaces (les autres PC peuvent rejoindre), affiche ses adresses réseau au démarrage et les expose sur `GET /info`.
 
-Chaque client envoie sa position, son animation, son personnage, ses points de vie, son état de K.O. et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde fait 2600 px de large et est partagé par tous. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné et un joueur muet pendant plus de 20 s est déconnecté.
+Chaque client envoie sa position, son animation, son personnage, ses points de vie, son état de K.O. et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde est généré à partir d'une graine commune (environ 8 300 px de large) et partagé par tous. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné et un joueur muet pendant plus de 20 s est déconnecté.
 
 ## Tests
 
@@ -150,7 +167,7 @@ Chaque client envoie sa position, son animation, son personnage, ses points de v
 npm test
 ```
 
-Les tests (sans dépendance) vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio — synthèse de chaque preset, lecture des pas d'herbe dédiés, décodage des fichiers et repli synthèse avec un faux navigateur (`test/audio.test.js`), l'intégrité et la correspondance des sources de la banque de sons (`test/sfx-bank.test.js`), le moteur d'effets visuels, brins compris (`test/effects.test.js`), l'herbe interactive — pose des touffes, courbure et retour au repos, froissements espacés, brins occasionnels (`test/grass.test.js`) — et rejouent les transports en ligne et local, la reconnexion, l'adresse du serveur à rejoindre (`192.168.1.24`, `?server=…`, adresse mémorisée, changement de serveur en cours de partie) et la synchronisation des héros / attaques à l'aide de faux WebSocket et `BroadcastChannel` (`test/net.test.js`).
+Les tests (sans dépendance) vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio — synthèse de chaque preset, lecture des pas d'herbe dédiés, décodage des fichiers et repli synthèse avec un faux navigateur (`test/audio.test.js`), l'intégrité et la correspondance des sources de la banque de sons (`test/sfx-bank.test.js`), le moteur d'effets visuels, brins compris (`test/effects.test.js`), le monde procédural — graine, biomes, marchabilité du relief, plateformes atteignables et atterrissages (`test/world.test.js`), le rendu des biomes sur un contexte factice (`test/scenery.test.js`), l'herbe interactive — pose des touffes, courbure et retour au repos, froissements espacés, brins occasionnels (`test/grass.test.js`) — et rejouent les transports en ligne et local, la reconnexion, l'adresse du serveur à rejoindre (`192.168.1.24`, `?server=…`, adresse mémorisée, changement de serveur en cours de partie) et la synchronisation des héros / attaques à l'aide de faux WebSocket et `BroadcastChannel` (`test/net.test.js`).
 
 ## Sprites et décor
 

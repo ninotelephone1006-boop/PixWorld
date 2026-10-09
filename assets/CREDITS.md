@@ -42,3 +42,8 @@ Le ninja original provient de [OpenGameArt — Ninja Animated](https://opengamea
 ## Menu
 
 Le menu n'embarque pas de texture externe : ses panneaux, grilles, lueurs, anneaux et animations sont générés en CSS et Canvas. Il utilise les spritesheets CC0 ci-dessus pour les aperçus animés des héros.
+
+## Monde procédural et biomes (v1.4)
+
+- **Aucune image tierce ajoutée.** Les textures de sol (corps de terre, sable, neige, basalte), les ciels, les silhouettes lointaines, les arbres, cactus, pins, roches, cristaux et mares de lave sont dessinés en code par `src/scenery.js` ; le relief, les plateformes et la disposition du décor viennent de `src/world.js`.
+- La prairie conserve les fichiers « Sunny Land » décrits plus haut.
