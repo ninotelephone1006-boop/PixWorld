@@ -11,7 +11,8 @@
  *   2. une synthèse maison, dérivée de ZzFX (Frank Force, licence MIT, voir
  *      assets/CREDITS.md), qui prend le relais quand un fichier n'est pas
  *      encore chargé ou n'a pas pu l'être (page ouverte en file://, hors
- *      ligne…). Elle génère aussi des pas de secours, adaptés à chaque matière.
+ *      ligne…). Elle génère aussi des pas de secours, adaptés à chaque matière,
+ *      et le froissement de l'herbe (« grassRustle », sans fichier dédié).
  *
  *   PixWorldAudio.play("jump")                      → son local
  *   PixWorldAudio.playAt("slash", worldX)           → son d'un joueur distant
@@ -149,6 +150,57 @@ window.PixWorldAudio = (() => {
     return samples;
   }
 
+  /**
+   * Froissement d'herbe, synthétisé (le pack CC0 n'en contient pas) : bruit
+   * filtré dans la bande 1,5 à 6 kHz, enveloppe de frottement et une quinzaine
+   * de rafales brèves (des brins qui se frôlent). Court et déterministe : chaque
+   * variante garde son propre grain, et le son est normalisé à la construction.
+   */
+  function buildGrassRustleSamples(variant) {
+    const length = Math.round(SAMPLE_RATE * 0.3);
+    const samples = new Float32Array(length);
+    const random = seededNoise((0x3c6ef372 ^ Math.imul(variant, 0x9e3779b1)) >>> 0);
+    const unit = () => (random() + 1) / 2; // valeur dans [0, 1]
+    const grains = [];
+    for (let g = 0; g < 16; g++) {
+      grains.push({
+        start: Math.floor(unit() * length * 0.85),
+        span: Math.round(SAMPLE_RATE * (0.003 + unit() * 0.006)),
+        gain: 0.4 + unit() * 0.6,
+      });
+    }
+    // Passe-haut (1,5 kHz) puis deux passes passe-bas (5 kHz) : des aigus
+    // adoucis, pour un froissement et non un souffle.
+    const highCoef = Math.exp((-2 * Math.PI * 1500) / SAMPLE_RATE);
+    const lowCoef = 1 - Math.exp((-2 * Math.PI * 5000) / SAMPLE_RATE);
+    let lastInput = 0;
+    let highOut = 0;
+    let lowOut = 0;
+    let lowOut2 = 0;
+    let peak = 0;
+    for (let i = 0; i < length; i++) {
+      const t = i / SAMPLE_RATE;
+      const white = random();
+      highOut = highCoef * (highOut + white - lastInput);
+      lastInput = white;
+      lowOut += (highOut - lowOut) * lowCoef;
+      lowOut2 += (lowOut - lowOut2) * lowCoef;
+      const envelope = (1 - Math.exp(-t / 0.012)) * Math.exp(-t / 0.09);
+      let flutter = 0;
+      for (let g = 0; g < grains.length; g++) {
+        const grain = grains[g];
+        const k = i - grain.start;
+        if (k >= 0 && k < grain.span) flutter += grain.gain * (0.5 - 0.5 * Math.cos((2 * Math.PI * k) / grain.span));
+      }
+      const sample = lowOut2 * (0.3 + 0.7 * Math.min(1, flutter)) * envelope;
+      samples[i] = sample;
+      if (Math.abs(sample) > peak) peak = Math.abs(sample);
+    }
+    const gain = peak > 0 ? 0.75 / peak : 0;
+    for (let i = 0; i < length; i++) samples[i] *= gain;
+    return samples;
+  }
+
   /** Souffle et crépitement déterministes pour lancement / impact de flamme. */
   function buildFireballSamples(kind) {
     const impact = kind === "impact";
@@ -201,6 +253,19 @@ window.PixWorldAudio = (() => {
       PRESETS[stepName(material, variant)] = stepPreset(material, variant);
     }
   });
+
+  // Froissement de l'herbe : quatre variantes construites par buildGrassRustleSamples.
+  // Seuls le volume (index 0) et la variation de hauteur (index 1) sont lus ici.
+  const GRASS_RUSTLE_VARIANTS = 4;
+  const GRASS_RUSTLE_PATTERN = /^grassRustle(\d+)$/;
+  const grassRustleName = (variant) => `grassRustle${variant}`;
+  for (let variant = 1; variant <= GRASS_RUSTLE_VARIANTS; variant++) {
+    const params = new Array(21).fill(0);
+    params[0] = 0.5; // volume de référence
+    params[1] = 0.08; // variation de hauteur à la lecture, ±8 %
+    PRESETS[grassRustleName(variant)] = params;
+  }
+  let lastGrassRustle = 0;
 
   // ───────────────────────── Synthèse (ZzFX) ─────────────────────────
   /**
@@ -394,12 +459,15 @@ window.PixWorldAudio = (() => {
 
     let samples;
     const stepMatch = STEP_PATTERN.exec(name);
+    const rustleMatch = GRASS_RUSTLE_PATTERN.exec(name);
     if (name === "castOrb") {
       samples = buildFireballSamples("launch");
     } else if (name === "hitOrb") {
       samples = buildFireballSamples("impact");
     } else if (stepMatch && stepMatch[1] === "Grass") {
       samples = buildGrassStepSamples(Number(stepMatch[2]));
+    } else if (rustleMatch) {
+      samples = buildGrassRustleSamples(Number(rustleMatch[1]));
     } else {
       // On gèle la part aléatoire à la construction : la variation se fait
       // ensuite via la vitesse de lecture, comme ZZFXSound.
@@ -500,7 +568,7 @@ window.PixWorldAudio = (() => {
     if (!ensureContext()) return;
     unlocked = true;
     // Pré-calcule les sons les plus fréquents pendant que le menu est ouvert.
-    ["jump", "land", "stepGrass1", "hurt", "uiSelect", "uiHover"].forEach(samplesFor);
+    ["jump", "land", "stepGrass1", "grassRustle1", "hurt", "uiSelect", "uiHover"].forEach(samplesFor);
     // Puis décode les fichiers : les sons courants d'abord, le reste ensuite.
     if (BANK_EVENTS.length) {
       preloadBank(PRELOAD_FIRST).then(() => {
@@ -579,12 +647,21 @@ window.PixWorldAudio = (() => {
     return buffers[index];
   }
 
+  /** Variante de froissement au hasard, jamais deux fois la même de suite. */
+  function pickGrassRustleVariant() {
+    let variant = 1 + Math.floor(Math.random() * GRASS_RUSTLE_VARIANTS);
+    if (variant === lastGrassRustle) variant = (variant % GRASS_RUSTLE_VARIANTS) + 1;
+    lastGrassRustle = variant;
+    return variant;
+  }
+
   /**
    * Résout le nom d'un son : « step » devient une variante par matière ;
-   * l'herbe est lue depuis sa banque CC0, les autres matières gardent leur
-   * synthèse de secours.
+   * « grassRustle » devient une variante de froissement ; l'herbe est lue
+   * depuis sa banque CC0, les autres matières gardent leur synthèse de secours.
    */
   function resolveName(name, opts) {
+    if (name === "grassRustle") return grassRustleName(pickGrassRustleVariant());
     if (name !== "step") return name;
     const wanted = opts && opts.material;
     const material = (wanted && STEP_MATERIALS[wanted] ? wanted : STEP_MATERIALS[footstepMaterial] ? footstepMaterial : "grass");

@@ -81,7 +81,7 @@ for (let i = 0; i < 240; i++) fx.update(1 / 60);
 assert.strictEqual(fx.count, 0, "Toutes les particules, textes et anneaux ont disparu");
 
 // Les émetteurs unitaires existent et fonctionnent.
-["sparks", "burst", "dust", "trail", "muzzle", "respawn", "heal"].forEach((name) => {
+["sparks", "burst", "dust", "trail", "muzzle", "respawn", "heal", "blades"].forEach((name) => {
   assert.strictEqual(typeof fx[name], "function", "Émetteur " + name + " disponible");
 });
 fx.trail(10, 10, "arrow", "#ffffff", 1);
@@ -92,4 +92,43 @@ assert(fx.count > 0, "Les émetteurs unitaires produisent des effets");
 fx.clear();
 assert.strictEqual(fx.count, 0, "clear() vide tout");
 console.log("  ok   Plafonds, secousse, dessin et extinction des effets");
+
+// Brins d'herbe : une forme effilée, lancée dans le sens demandé, qui s'éteint vite.
+/** Contexte factice qui relève les positions de translate() : x de chaque brin. */
+function translateRecorder(positions) {
+  return new Proxy(
+    {},
+    {
+      get(target, property) {
+        if (property === "translate") return (x) => positions.push(x);
+        if (property === "createRadialGradient" || property === "createLinearGradient") return () => ({ addColorStop() {} });
+        return () => undefined;
+      },
+      set() {
+        return true;
+      },
+    },
+  );
+}
+fx.blades(500, 300, { count: 4, direction: -1 });
+assert.strictEqual(fx.count, 4, "blades() émet le nombre de brins demandé");
+const spawned = [];
+fx.draw(translateRecorder(spawned), 0);
+fx.update(0.2);
+const moved = [];
+fx.draw(translateRecorder(moved), 0);
+assert.strictEqual(moved.length, 4, "Chaque brin est dessiné");
+assert(moved.every((x, i) => x < spawned[i]), "Les brins partent vers la gauche, dans le sens de la marche");
+fx.clear();
+fx.blades(500, 300, { count: 3, direction: 1 });
+const rightSpawn = [];
+fx.draw(translateRecorder(rightSpawn), 0);
+fx.update(0.2);
+const rightMoved = [];
+fx.draw(translateRecorder(rightMoved), 0);
+assert(rightMoved.every((x, i) => x > rightSpawn[i]), "Les brins partent vers la droite quand on marche à droite");
+fx.update(1.0);
+assert.strictEqual(fx.count, 0, "Les brins disparaissent en moins d'une seconde");
+fx.clear();
+console.log("  ok   Brins d'herbe dans le sens de la marche, éphémères");
 console.log("Moteur d'effets valide");

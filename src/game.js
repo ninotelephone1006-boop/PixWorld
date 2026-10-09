@@ -53,6 +53,12 @@
 
   const audio = window.PixWorldAudio;
   const fx = window.PixWorldEffects.create();
+  // Herbe interactive : les touffes du sol plient, font un froissement et
+  // projettent parfois des brins quand un personnage les traverse (src/grass.js).
+  const grass = window.PixWorldGrass.create({
+    onRustle: handleGrassRustle,
+    onBlades: handleGrassBlades,
+  });
 
   const STORAGE_NAME = "pixworld.name";
   const STORAGE_CHARACTER = "pixworld.character";
@@ -108,6 +114,9 @@
     [16, 115],
     [48, 115],
   ];
+  const tuftScale = 3; // touffes de 16 × 13 px de la feuille, à l'échelle 3
+  const tuftW = tileSize * tuftScale;
+  const tuftH = 13 * tuftScale;
   const frameSize = 32;
   const spriteScale = 4;
   const spriteDrawSize = frameSize * spriteScale;
@@ -549,6 +558,7 @@
     player.regenAnnounced = true;
     projectiles.length = 0;
     fx.clear();
+    grass.clear();
     camX = 0;
     sfx("uiPause");
     connect();
@@ -818,6 +828,41 @@
     renderPanel();
   }
 
+  // ─────────────────────────── Herbe interactive ───────────────────────────
+  /** Personnages qui peuvent plier l'herbe : le joueur local et les autres. */
+  function grassWalkers() {
+    const walkers = [];
+    if (playing && player.deadTime === 0) {
+      walkers.push({
+        id: "self",
+        x: player.x,
+        width: player.width,
+        vx: player.velocityX,
+        gap: groundY - (player.y + player.height),
+      });
+    }
+    others.forEach((peer) => {
+      if (!peer.dead) walkers.push({ id: peer.id, x: peer.rx, width: player.width, vx: peer.vx, gap: peer.gap });
+    });
+    return walkers;
+  }
+
+  /**
+   * Froissement d'une touffe : centré pour nous, spatialisé pour les autres.
+   * Calé sur un pas d'herbe (environ 0,8 × 0,5 de la banque) : il accompagne la
+   * marche sans la couvrir.
+   */
+  function handleGrassRustle(event) {
+    const volume = 0.15 + 0.2 * event.strength;
+    if (event.walkerId === "self") sfx("grassRustle", { volume });
+    else sfxAt("grassRustle", event.x, { volume: volume * 0.9 });
+  }
+
+  /** Quelques brins projetés dans le sens de la marche, parfois seulement. */
+  function handleGrassBlades(event) {
+    fx.blades(event.x, groundY - 24, { count: 2 + Math.floor(Math.random() * 3), direction: event.dir });
+  }
+
   // ─────────────────────────── Boucle de jeu ───────────────────────────
   function resize() {
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -1056,6 +1101,7 @@
     }
 
     updateOthers(delta);
+    grass.update(delta, grassWalkers());
     updateProjectiles(delta);
     checkMeleeHits();
     fx.update(delta);
@@ -1901,6 +1947,42 @@
     }
   }
 
+  /**
+   * Touffe posée sur le sol (tileX : bord gauche de sa tuile à l'écran).
+   * Au repos, elle est dessinée d'un seul tenant. Quand un personnage vient
+   * de la traverser, elle est dessinée ligne par ligne : la pointe se décale
+   * davantage que la base, par pas entiers (pixel art préservé), avec une
+   * ondulation qui remonte les brins.
+   */
+  function drawGroundTuft(tuft, tileX) {
+    const [sourceX, sourceY] = tuftTiles[tuft.variant];
+    const drawX = tileX + (tileDraw - tuftW) / 2;
+    const drawY = groundY - tuftH + 4;
+    const pose = grass.poseFor(tuft.tile);
+    if (!pose) {
+      ctx.drawImage(tileset, sourceX, sourceY, tileSize, 13, drawX, drawY, tuftW, tuftH);
+      return;
+    }
+
+    const lean = clamp(pose.lean / tuftScale, -6, 6); // déviation de la pointe, en pixels d'image
+    for (let row = 0; row < 13; row++) {
+      const height = (12 - row) / 12; // 0 à la base, 1 à la pointe
+      const ripple = pose.wave * 1.4 * height * Math.sin(pose.phase - height * 2.6);
+      const shift = Math.round(lean * height * height + ripple) * tuftScale;
+      ctx.drawImage(
+        tileset,
+        sourceX,
+        sourceY + row,
+        tileSize,
+        1,
+        drawX + shift,
+        drawY + row * tuftScale,
+        tuftW,
+        tuftScale,
+      );
+    }
+  }
+
   function drawGround() {
     if (!(tileset.complete && tileset.naturalWidth > 0)) {
       // Sol gris de secours avant chargement de la feuille de tuiles.
@@ -1912,8 +1994,6 @@
     const firstTile = Math.floor(camX / tileDraw) - 1;
     const startX = -(camX % tileDraw) - tileDraw;
     const rows = Math.ceil((height - groundY) / tileDraw) + 1;
-    const tuftW = tileSize * 3;
-    const tuftH = 13 * 3;
 
     for (let c = 0; startX + c * tileDraw < width + tileDraw; c++) {
       const worldTile = firstTile + c;
@@ -1925,11 +2005,9 @@
         ctx.drawImage(tileset, dirt[0], dirt[1], tileSize, tileSize, x, groundY + r * tileDraw, tileDraw, tileDraw);
       }
 
-      // Touffes d'herbe décoratives, posées de façon déterministe.
-      if (hash(worldTile + 999) < 0.2) {
-        const tuft = tuftTiles[Math.floor(hash(worldTile + 777) * tuftTiles.length)];
-        ctx.drawImage(tileset, tuft[0], tuft[1], tileSize, 13, x + (tileDraw - tuftW) / 2, groundY - tuftH + 4, tuftW, tuftH);
-      }
+      // Touffes d'herbe décoratives, posées de façon déterministe (src/grass.js).
+      const tuft = window.PixWorldGrass.tuftFor(worldTile);
+      if (tuft) drawGroundTuft(tuft, x);
     }
   }
 
@@ -1937,8 +2015,6 @@
   // l'effet de profondeur de la parallaxe.
   function drawForeground() {
     if (!(tileset.complete && tileset.naturalWidth > 0)) return;
-    const tuftW = tileSize * 3;
-    const tuftH = 13 * 3;
     const scroll = camX * foregroundFactor;
     const firstTile = Math.floor(scroll / tuftW) - 1;
     const startX = -(scroll % tuftW) - tuftW;

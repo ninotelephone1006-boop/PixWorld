@@ -113,6 +113,21 @@ assert.doesNotThrow(() => audio.play("step", { volume: 0.8 }), "Jouer un pas ne 
 assert.doesNotThrow(() => audio.playAt("step", 900, { volume: 0.5 }), "Jouer un pas lointain ne plante pas");
 console.log("  ok   Pas d'herbe échantillonnés, " + materials.length + " matières × 6 variantes de secours");
 
+// Froissement d'herbe : le pack n'a pas de fichier dédié, il est synthétisé en
+// quatre variantes courtes, différentes les unes des autres.
+const rustles = names.filter((name) => /^grassRustle\d$/.test(name));
+assert.strictEqual(rustles.length, 4, "Le froissement d'herbe a quatre variantes");
+rustles.forEach((name) => {
+  const duration = audio.build(name).length / SAMPLE_RATE;
+  assert(duration >= 0.2 && duration <= 0.35, "Le froissement « " + name + " » dure de 0,2 à 0,35 s (" + duration.toFixed(2) + " s)");
+});
+const rustleA = audio.build("grassRustle1");
+const rustleB = audio.build("grassRustle2");
+let rustleDifference = 0;
+for (let i = 0; i < Math.min(rustleA.length, rustleB.length); i++) rustleDifference += Math.abs(rustleA[i] - rustleB[i]);
+assert(rustleDifference / rustleA.length > 0.02, "Les variantes de froissement diffèrent");
+console.log("  ok   Froissement d'herbe synthétisé en 4 variantes courtes");
+
 // L'API ne doit jamais lever d'erreur, même sans son.
 assert.strictEqual(audio.play("jump"), null, "play() sans AudioContext renvoie null sans planter");
 assert.strictEqual(audio.playAt("land", 1200, { volume: 0.5 }), null, "playAt() sans AudioContext renvoie null");
@@ -275,6 +290,27 @@ function fileFetch(url) {
     if (voice) steps.add(voice.buffer);
   }
   assert(steps.size >= 3, "Les variantes de pas d'herbe alternent (" + steps.size + ")");
+
+  // Le froissement d'herbe n'a pas de fichier : il est synthétisé, et deux
+  // froissements d'affilée ne reprennent jamais la même variante.
+  const rustle = engine.play("grassRustle", { volume: 0.5 });
+  assert(rustle, "Le froissement d'herbe est joué");
+  assert.strictEqual(rustle.buffer.fromFile, false, "Le froissement est synthétisé");
+  const fingerprint = (values) => {
+    let sum = 0;
+    for (let i = 0; i < Math.min(values.length, 4000); i++) sum += values[i] * (i + 1);
+    return sum;
+  };
+  const known = [1, 2, 3, 4].map((variant) => fingerprint(engine.build("grassRustle" + variant)));
+  const played = [];
+  for (let i = 0; i < 60; i++) {
+    const voice = engine.play("grassRustle", { volume: 0.5 });
+    if (voice) played.push(known.indexOf(fingerprint(voice.buffer.getChannelData(0))));
+  }
+  assert(played.length >= 50, "Les froissements sont joués (" + played.length + ")");
+  assert(played.every((index) => index >= 0), "Chaque froissement joué correspond à une variante connue");
+  assert(played.every((index, i) => i === 0 || index !== played[i - 1]), "Deux froissements d'affilée ne se répètent jamais");
+  assert(new Set(played).size >= 3, "Les variantes de froissement alternent (" + new Set(played).size + " sur 4)");
   assert(started.length > 40, "Les voix démarrées sont comptées");
   console.log("  ok   Fichiers décodés, variantes alternées, repli synthèse et pas d'herbe");
   console.log("Moteur audio valide");
