@@ -32,6 +32,12 @@ const IDLE_TIMEOUT_MS = 20000;
 const worldContext = { window: {} };
 vm.runInNewContext(fs.readFileSync(path.join(ROOT, "src/world.js"), "utf8"), worldContext);
 const WORLD_WIDTH = worldContext.window.PixWorldWorld.create("pixworld").width;
+const miningContext = { window: {} };
+vm.runInNewContext(fs.readFileSync(path.join(ROOT, "src/mining.js"), "utf8"), miningContext);
+const MINING = miningContext.window.PixWorldMining.constants;
+const MINING_COLUMNS = Math.ceil(WORLD_WIDTH / MINING.BLOCK_SIZE);
+const MINED_BLOCKS = new Set();
+const MINING_DROPS = new Map();
 const CHARACTER_IDS = new Set(["ninja", "archer", "samurai", "mage"]);
 
 const MIME = {
@@ -146,6 +152,13 @@ function broadcast(message, exceptId) {
   });
 }
 
+function miningSnapshot() {
+  return {
+    mined: Array.from(MINED_BLOCKS, (key) => key.split(",").map(Number)),
+    drops: Array.from(MINING_DROPS.values(), (drop) => ({ ...drop })),
+  };
+}
+
 // ───────────────────────── WebSocket : handshake (RFC 6455) ─────────────────────────
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -210,7 +223,7 @@ function registerPlayer(socket) {
       roster.push({ id: other.id, name: other.name, character: other.character });
     }
   });
-  send(socket, { t: "welcome", id, players: roster });
+  send(socket, { t: "welcome", id, players: roster, mining: miningSnapshot() });
   console.log("+ " + id + " connecté (" + players.size + " joueur(s))");
 
   const handleFrame = createFrameHandler(player);
@@ -265,7 +278,7 @@ function handleMessage(player, message) {
   if (message.t === "state") {
     player.state = {
       x: Math.round(clampNumber(message.x, 0, WORLD_WIDTH, player.state.x)),
-      gap: Math.round(clampNumber(message.gap, 0, 4000, 0)),
+      gap: Math.round(clampNumber(message.gap, -MINING.TOTAL_HEIGHT - 600, 4000, 0)),
       f: Number(message.f) < 0 ? -1 : 1,
       vx: Math.round(clampNumber(message.vx, -4000, 4000, 0)),
       vy: Math.round(clampNumber(message.vy, -4000, 4000, 0)),
@@ -276,6 +289,37 @@ function handleMessage(player, message) {
       hp: Math.round(clampNumber(message.hp, 0, 100, player.state.hp == null ? 100 : player.state.hp)),
       d: Boolean(message.d), // K.O. en cours : les autres jouent l'animation
     };
+    return;
+  }
+
+  if (message.t === "mineBlock") {
+    if (!player.joined) return;
+    const column = Number(message.column);
+    const row = Number(message.row);
+    const serial = Number(message.serial);
+    if (!Number.isInteger(column) || column < 0 || column >= MINING_COLUMNS ||
+        !Number.isInteger(row) || row < 0 || row >= MINING.ROWS ||
+        !Number.isSafeInteger(serial) || serial < 0 || serial > 2147483647) return;
+
+    const key = column + "," + row;
+    const dropId = player.id + ":" + serial;
+    if (MINED_BLOCKS.has(key) || MINING_DROPS.has(dropId)) {
+      send(player.socket, { t: "mineRejected", column, row, serial });
+      return;
+    }
+    MINED_BLOCKS.add(key);
+    const drop = { id: dropId, column, row, ownerId: player.id };
+    MINING_DROPS.set(dropId, drop);
+    broadcast({ t: "mineBlock", ...drop, dropId, serial });
+    return;
+  }
+
+  if (message.t === "minePickup") {
+    if (!player.joined) return;
+    const dropId = typeof message.dropId === "string" ? message.dropId.slice(0, 80) : "";
+    if (!dropId || !MINING_DROPS.has(dropId)) return;
+    MINING_DROPS.delete(dropId);
+    broadcast({ t: "minePickup", dropId, collectorId: player.id });
   }
 }
 

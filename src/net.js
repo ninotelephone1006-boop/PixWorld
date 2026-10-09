@@ -100,6 +100,12 @@ window.PixWorldNet = (() => {
       sendState(state) {
         if (joined && mode === "online") send({ ...state, t: "state" });
       },
+      mineBlock(column, row, serial) {
+        if (joined && mode === "online") send({ t: "mineBlock", column, row, serial });
+      },
+      pickupDrop(dropId) {
+        if (joined && mode === "online") send({ t: "minePickup", dropId: String(dropId) });
+      },
       close() { closed = true; clearTimeout(retry); detach(); },
     };
   }

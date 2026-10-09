@@ -58,6 +58,13 @@
   const playersRename = document.querySelector("#players-rename");
   const soundToggle = document.querySelector("#sound-toggle");
   const toasts = document.querySelector("#toasts");
+  const hotbar = document.querySelector("#hotbar");
+  const hotbarSlots = Array.from(document.querySelectorAll(".hotbar-slot"));
+  const hotbarCounts = {
+    grass: document.querySelector("#count-grass"),
+    dirt: document.querySelector("#count-dirt"),
+    stone: document.querySelector("#count-stone"),
+  };
 
   const audio = window.PixWorldAudio;
   const fx = window.PixWorldEffects.create();
@@ -105,7 +112,6 @@
   const tileSize = 16;
   const tileScale = 4;
   const tileDraw = tileSize * tileScale;
-  const groundHeight = tileDraw * 2;
   // Herbes du premier plan (défilement plus rapide que le sol).
   const foregroundFactor = 1.3;
   // Tuiles de la feuille : touffes d'herbe de la prairie.
@@ -129,6 +135,16 @@
   const WORLD_SEED = "pixworld";
   const world = window.PixWorldWorld.create(WORLD_SEED);
   const WORLD_WIDTH = world.width;
+  const BLOCK_SIZE = player.height / 2; // deux blocs = la hauteur de collision du joueur
+  const mining = window.PixWorldMining.create({ worldWidth: WORLD_WIDTH, blockSize: BLOCK_SIZE });
+  const miningTextures = Object.create(null);
+  Object.keys(window.PixWorldMining.BLOCKS).forEach((type) => {
+    const image = new Image();
+    image.src = window.PixWorldMining.BLOCKS[type].image;
+    miningTextures[type] = image;
+  });
+  const miningBlockTypes = ["grass", "dirt", "stone"];
+  const miningTime = window.PixWorldMining.constants.MINE_TIME;
   const scenery = window.PixWorldScenery.create({
     world,
     images: { sky: skyLayer, hills: hillsLayer },
@@ -181,6 +197,13 @@
   let selectedCharacter = "ninja";
   let lastPanelHp = MAX_HP;
   const projectiles = [];
+  const miningPointer = { x: 0, y: 0, inside: false, down: false, pointerId: null };
+  let miningTargetKey = null;
+  let miningElapsed = 0;
+  let miningRequestedKey = null;
+  let miningSequence = 1;
+  const pendingMiningSerials = new Set();
+  let selectedHotbarSlot = 0;
 
   // ───────────────────────── État multijoueur ─────────────────────────
   /** Autres joueurs : id -> { id, name, character, hp, x, gap, rx, ry, ... } */
@@ -216,9 +239,34 @@
     return value < min ? min : value > max ? max : value;
   }
 
+  function updateHotbar() {
+    const counts = mining.inventory();
+    hotbarSlots.forEach((slot, index) => {
+      const type = miningBlockTypes[index];
+      const amount = counts[type] || 0;
+      const label = window.PixWorldMining.BLOCKS[type].label;
+      const count = hotbarCounts[type];
+      if (count) count.textContent = String(amount);
+      slot.classList.toggle("is-selected", index === selectedHotbarSlot);
+      slot.setAttribute("aria-pressed", index === selectedHotbarSlot ? "true" : "false");
+      slot.setAttribute("aria-label", "Emplacement " + (index + 1) + " : " + label.toLowerCase() + ", " + amount);
+    });
+  }
+
+  function selectHotbar(index, withSound) {
+    selectedHotbarSlot = (index + miningBlockTypes.length) % miningBlockTypes.length;
+    updateHotbar();
+    if (withSound) sfx("uiSelect", { volume: 0.45, pitch: 1 + selectedHotbarSlot * 0.08 });
+  }
+
+  function setHotbarVisible(visible) {
+    hotbar.hidden = !visible;
+  }
+
   /** Hauteur du sol (écran) sous l'abscisse monde x : le relief varie avec le monde. */
   function groundAt(x) {
-    return groundY - world.offsetAt(x);
+    const top = mining.surfaceAt(x, groundY);
+    return top === null ? groundY + mining.totalHeight : top;
   }
 
   /** Centre horizontal d'un personnage dont le bord gauche est en x. */
@@ -515,6 +563,8 @@
   function openMenu(mode) {
     menuMode = mode === "pause" ? "pause" : "start";
     playing = false;
+    setHotbarVisible(false);
+    resetMiningInput();
     player.velocityX = 0;
     keys.clear();
     syncMenuFromIdentity();
@@ -581,6 +631,8 @@
     applyMenuSelection();
     hideMenu();
     playing = true;
+    setHotbarVisible(true);
+    updateHotbar();
     keys.clear();
     panelDirty = true;
     audio.sequence([
@@ -595,6 +647,8 @@
     syncMenuFromIdentity();
     hideMenu();
     playing = true;
+    setHotbarVisible(true);
+    updateHotbar();
     keys.clear();
     panelDirty = true;
     sfx("uiBack");
@@ -640,6 +694,8 @@
       applyMenuSelection();
       hideMenu();
       playing = true;
+      setHotbarVisible(true);
+      updateHotbar();
       keys.clear();
       panelDirty = true;
       sfx("uiConfirm", { volume: 0.8 });
@@ -679,8 +735,39 @@
         // propre, le serveur nous renvoie ceux qui sont déjà là.
         others.clear();
         myId = message.id;
+        mining.applyState(message.mining || {});
+        mining.clearPendingClaims();
+        pendingMiningSerials.clear();
         (message.players || []).forEach(addPeer);
+        updateHotbar();
         panelDirty = true;
+        break;
+      }
+      case "mineBlock": {
+        const column = Number(message.column);
+        const row = Number(message.row);
+        if (!Number.isInteger(column) || !Number.isInteger(row) || typeof message.dropId !== "string") break;
+        const broken = mining.breakBlock(column, row, {
+          baseY: groundY,
+          dropId: message.dropId,
+          ownerId: message.ownerId,
+          networked: true,
+        });
+        if (broken) blockBreakFeedback(broken, message.ownerId !== myId);
+        if (message.ownerId === myId) pendingMiningSerials.delete(Number(message.serial));
+        break;
+      }
+      case "mineRejected": {
+        pendingMiningSerials.delete(Number(message.serial));
+        miningRequestedKey = null;
+        miningElapsed = 0;
+        break;
+      }
+      case "minePickup": {
+        const item = message.collectorId === myId
+          ? mining.collectDrop(message.dropId)
+          : mining.removeDrop(message.dropId);
+        if (item && message.collectorId === myId) awardMinedDrop(item);
         break;
       }
       case "join": {
@@ -718,6 +805,9 @@
       }
       case "disconnected": {
         others.clear();
+        mining.clearPendingClaims();
+        pendingMiningSerials.clear();
+        resetMiningInput();
         toast("Connexion perdue", true);
         sfx("connectionLost");
         panelDirty = true;
@@ -787,7 +877,7 @@
     }
     const wasGrounded = peer.g;
     peer.x = clamp(Number(state.x) || 0, 0, WORLD_WIDTH - player.width);
-    peer.gap = Math.max(0, Number(state.gap) || 0);
+    peer.gap = clamp(Number(state.gap) || 0, -mining.totalHeight - 600, 4000);
     peer.f = Number(state.f) >= 0 ? 1 : -1;
     peer.vx = Number(state.vx) || 0;
     peer.vy = Number(state.vy) || 0;
@@ -924,8 +1014,12 @@
     others.forEach((peer) => {
       if (!peer.dead) walkers.push({ id: peer.id, x: peer.rx, width: player.width, vx: peer.vx, gap: peer.gap });
     });
-    // L'herbe ne se trouve que dans la prairie : ailleurs, personne ne la plie.
-    return walkers.filter((walker) => world.biomeAt(centerOf(walker.x)).id === "prairie");
+    // Les touffes ne réagissent qu'au-dessus d'un bloc d'herbe encore intact.
+    return walkers.filter((walker) => {
+      const x = centerOf(walker.x);
+      const surface = mining.surfaceBlockAt(x, groundY);
+      return world.biomeAt(x).id === "prairie" && surface && surface.type === "grass";
+    });
   }
 
   /**
@@ -954,7 +1048,8 @@
     canvas.height = Math.round(height * ratio);
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.imageSmoothingEnabled = false;
-    groundY = Math.max(0, height - groundHeight);
+    // Sur grand écran, les 15 couches occupent la partie basse sans être coupées.
+    groundY = Math.max(80, height - mining.totalHeight);
     player.x = clamp(player.x, 0, WORLD_WIDTH - player.width);
     if (player.grounded) player.y = groundAt(centerOf(player.x)) - player.height;
     draw();
@@ -1158,6 +1253,108 @@
     }
   }
 
+  function currentMiningTarget() {
+    if (!playing || !miningPointer.inside) return null;
+    const worldX = miningPointer.x + camX - fx.shakeX;
+    const worldY = miningPointer.y - fx.shakeY;
+    return mining.blockAt(worldX, worldY, groundY);
+  }
+
+  function updateMiningPointer(event) {
+    const rect = canvas.getBoundingClientRect();
+    miningPointer.x = event.clientX - rect.left;
+    miningPointer.y = event.clientY - rect.top;
+    miningPointer.inside = miningPointer.x >= 0 && miningPointer.x <= rect.width &&
+      miningPointer.y >= 0 && miningPointer.y <= rect.height;
+  }
+
+  function resetMiningInput() {
+    miningPointer.down = false;
+    miningPointer.pointerId = null;
+    miningTargetKey = null;
+    miningElapsed = 0;
+    miningRequestedKey = null;
+  }
+
+  function blockBreakFeedback(block, remote) {
+    if (!block) return;
+    const x = block.x + block.size / 2;
+    const y = groundY + block.row * BLOCK_SIZE + BLOCK_SIZE / 2;
+    fx.dust(x, y, { count: remote ? 4 : 8, direction: remote ? 0 : player.facing });
+    if (!remote) {
+      fx.shake(1.3, 0.08);
+      sfx("hitSlash", { volume: 0.44, pitch: block.type === "stone" ? 0.78 : 1.08 });
+      sfx("impactSpark", { volume: 0.3, pitch: 0.9 });
+    }
+  }
+
+  function requestMiningBreak(block) {
+    if (!block || miningRequestedKey === block.key) return;
+    miningRequestedKey = block.key;
+    const serial = miningSequence++;
+    const connected = net && net.mode === "online" && hasJoined && myId;
+    if (connected) {
+      pendingMiningSerials.add(serial);
+      net.mineBlock(block.column, block.row, serial);
+      return;
+    }
+
+    const broken = mining.breakBlock(block.column, block.row, {
+      baseY: groundY,
+      dropId: "local:" + serial,
+      networked: false,
+    });
+    if (broken) blockBreakFeedback(broken, false);
+  }
+
+  function awardMinedDrop(drop) {
+    if (!drop) return;
+    const label = window.PixWorldMining.BLOCKS[drop.type].label;
+    updateHotbar();
+    sfx("uiSelect", { volume: 0.58, pitch: 1.15 });
+    fx.text(drop.x, groundY + drop.depth - 11, "+1 " + label.toLowerCase(), {
+      color: drop.type === "stone" ? "#e1edf0" : drop.type === "dirt" ? "#ffd09a" : "#bdf27b",
+      size: 14,
+      duration: 0.9,
+      vy: -24,
+    });
+  }
+
+  function updateMining(delta) {
+    if (playing) {
+      mining.updateDrops(delta);
+      if (player.deadTime === 0) {
+        const target = currentMiningTarget();
+        if (miningPointer.down && target) {
+          if (target.key !== miningTargetKey) {
+            miningTargetKey = target.key;
+            miningElapsed = 0;
+            miningRequestedKey = null;
+          }
+          if (miningRequestedKey !== target.key) {
+            miningElapsed = Math.min(miningTime, miningElapsed + delta);
+            if (miningElapsed >= miningTime) requestMiningBreak(target);
+          }
+        } else {
+          miningTargetKey = null;
+          miningElapsed = 0;
+          miningRequestedKey = null;
+        }
+
+        const playerRect = { x: player.x, y: player.y, width: player.width, height: player.height };
+        mining.collectTouchedLocalDrops(playerRect, groundY).forEach(awardMinedDrop);
+        if (net && net.mode === "online" && hasJoined && myId) {
+          mining.findTouchedDrops(playerRect, groundY).forEach((drop) => {
+            if (!drop.networked || !mining.markDropPending(drop.id)) return;
+            net.pickupDrop(drop.id);
+          });
+        }
+      } else {
+        resetMiningInput();
+      }
+    }
+  }
+
   function update(delta) {
     if (playing) {
       player.animationTime += delta;
@@ -1181,6 +1378,7 @@
       }
     }
 
+    updateMining(delta);
     updateOthers(delta);
     grass.update(delta, grassWalkers());
     scenery.updateAmbient(delta, width, height, world.biomeAt(camX + width / 2).id);
@@ -1278,7 +1476,7 @@
       const feetBefore = player.y + player.height;
       player.velocityY += 1900 * delta;
       player.y += player.velocityY * delta;
-      const top = world.landingTop(centerOf(player.x), feetBefore, player.y + player.height, groundY);
+      const top = mining.landingTop(centerOf(player.x), feetBefore, player.y + player.height, groundY);
       if (top !== null && player.velocityY >= 0) {
         player.y = top - player.height;
         player.velocityY = 0;
@@ -1313,7 +1511,7 @@
       player.y += player.velocityY * delta;
 
       // Atterrissage sur le relief ou sur une plateforme traversée par le haut.
-      const top = world.landingTop(cx, feetBefore, player.y + player.height, groundY);
+      const top = mining.landingTop(cx, feetBefore, player.y + player.height, groundY);
       if (top !== null && player.velocityY >= 0) {
         player.y = top - player.height;
         const impact = player.velocityY;
@@ -1330,7 +1528,7 @@
     } else {
       // Au sol : on suit le relief (montées et descentes douces) ; si la
       // surface se dérobe, le personnage tombe.
-      const top = world.supportTop(cx, feetBefore, groundY);
+      const top = mining.supportTop(cx, feetBefore, groundY, BLOCK_SIZE * 0.8);
       if (top === null) {
         player.grounded = false;
         player.velocityY = 0;
@@ -2080,7 +2278,10 @@
     for (let c = 0; startX + c * tileDraw < width + tileDraw; c++) {
       const worldTile = firstTile + c;
       const x = startX + c * tileDraw;
-      if (world.biomeAt(worldTile * tileDraw + tileDraw / 2).id !== "prairie") continue;
+      const sampleX = worldTile * tileDraw + tileDraw / 2;
+      if (world.biomeAt(sampleX).id !== "prairie") continue;
+      const surface = mining.surfaceBlockAt(sampleX, groundY);
+      if (!surface || surface.type !== "grass") continue;
       const tuft = window.PixWorldGrass.tuftFor(worldTile);
       if (tuft) drawGroundTuft(tuft, x);
     }
@@ -2117,10 +2318,16 @@
     scenery.ensurePatterns(ctx);
     scenery.drawSky(ctx, width, height, camX, view.time);
     scenery.drawFarLayers(ctx, width, height, camX);
-    scenery.drawTerrain(ctx, view);
+    mining.drawTerrain(ctx, view, miningTextures);
     drawTufts();
     scenery.drawProps(ctx, view);
     scenery.drawPlatforms(ctx, view);
+    mining.drawDrops(ctx, view, miningTextures);
+    const miningTarget = currentMiningTarget();
+    if (miningTarget) {
+      const progress = miningPointer.down && miningTarget.key === miningTargetKey ? miningElapsed / miningTime : 0;
+      mining.drawTarget(ctx, miningTarget, progress, camX);
+    }
 
     drawOthers();
 
@@ -2152,7 +2359,6 @@
     drawProjectiles();
     fx.draw(ctx, camX);
 
-    drawForeground();
     scenery.drawAmbient(ctx);
     ctx.restore();
 
@@ -2214,6 +2420,11 @@
       return;
     }
     if (!playing) return;
+    if (/^[1-3]$/.test(event.key)) {
+      event.preventDefault();
+      selectHotbar(Number(event.key) - 1, true);
+      return;
+    }
 
     const controlCode = [
       "KeyQ",
@@ -2247,20 +2458,59 @@
     keys.delete(event.code);
     keys.delete(event.key.toLowerCase());
   });
-  window.addEventListener("blur", () => keys.clear());
+  window.addEventListener("blur", () => {
+    keys.clear();
+    miningPointer.inside = false;
+    resetMiningInput();
+  });
 
-  // Clic gauche : attaque dans la direction du curseur.
+  window.addEventListener("pointermove", (event) => {
+    if (event.target === canvas || miningPointer.down) updateMiningPointer(event);
+    else miningPointer.inside = false;
+  });
+
+  // Clic gauche sur un bloc : minage continu (2 s). Ailleurs, il reste une attaque.
   window.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !playing || event.target !== canvas) return;
     event.preventDefault();
-    const rect = canvas.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
+    updateMiningPointer(event);
+    const clickX = miningPointer.x;
     const playerScreenX = player.x + player.width / 2 - camX;
     if (Math.abs(clickX - playerScreenX) > 4 && player.deadTime === 0) {
       player.facing = clickX > playerScreenX ? 1 : -1;
     }
+
+    const target = currentMiningTarget();
+    if (target && player.deadTime === 0) {
+      miningPointer.down = true;
+      miningPointer.pointerId = event.pointerId;
+      miningTargetKey = target.key;
+      miningElapsed = 0;
+      miningRequestedKey = null;
+      try {
+        canvas.setPointerCapture(event.pointerId);
+      } catch (error) {
+        /* certains navigateurs ne prennent pas en charge la capture */
+      }
+      return;
+    }
     startAttack();
   });
+
+  window.addEventListener("pointerup", (event) => {
+    if (event.button === 0) resetMiningInput();
+  });
+  window.addEventListener("pointercancel", resetMiningInput);
+
+  hotbarSlots.forEach((slot, index) => {
+    slot.addEventListener("click", () => selectHotbar(index, true));
+  });
+  window.addEventListener("wheel", (event) => {
+    if (!playing || hotbar.hidden) return;
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? 1 : -1;
+    selectHotbar(selectedHotbarSlot + direction, true);
+  }, { passive: false });
 
   window.addEventListener("resize", resize);
 
@@ -2276,6 +2526,8 @@
 
   buildCharacterCards();
   updateSoundButtons();
+  updateHotbar();
+  setHotbarVisible(false);
   resize();
   connect();
   openMenu("start");

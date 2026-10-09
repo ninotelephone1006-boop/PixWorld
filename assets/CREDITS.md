@@ -32,6 +32,12 @@ Le ninja original provient de [OpenGameArt — Ninja Animated](https://opengamea
 - **Autres matières / secours :** les pas sur terre, pierre, bois et neige gardent six variantes synthétisées par `src/audio.js` (`STEP_MATERIALS`), également utilisées si les fichiers ne sont pas chargés ou accessibles (page ouverte en `file://`, hors ligne…). Les sons de lancement et d'impact de l'orbe ont aussi un rendu de flamme bruité en secours.
 - **Moteur :** adaptation de [ZzFX](https://github.com/KilledByAPixel/ZzFX) (« Zuper Zmall Zound Zynth ») de Frank Force, licence [MIT](https://github.com/KilledByAPixel/ZzFX/blob/master/LICENSE), © 2019 Frank Force. Les presets (paramètres de chaque son) sont propres à PixWorld.
 
+## Blocs minables — Pixel Platformer de Kenney (CC0)
+
+- **Atlas source inclus :** `blocks/kenney-pixel-platformer-atlas.png`, repris du fichier `Art/Platformer-assets-pixel/spritesheet.png` dans le dépôt GitHub [romance-ii/kenneydonation](https://github.com/romance-ii/kenneydonation/blob/master/Art/Platformer-assets-pixel/spritesheet.png), miroir des ressources de Kenney.
+- **Textures PixWorld :** `blocks/grass.png`, `blocks/dirt.png` et `blocks/stone.png` sont des recadrages pixel art mis à l'échelle et adaptés (teintes de terre et de pierre) depuis cet atlas.
+- **Auteur et licence :** [Kenney](https://kenney.nl), pack « Pixel Platformer » ; licence [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/), indiquée dans le fichier `LICENSE` du dépôt source. Utilisation libre ; attribution conservée par courtoisie.
+
 ## Décor « Sunny Land » (parallaxe)
 
 - **Fichiers :** `background/sky-back.png` (ciel et nuages), `background/hills-middle.png` (collines), `background/tileset.png` (sol en tuiles et touffes d'herbe).

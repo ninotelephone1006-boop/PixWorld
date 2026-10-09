@@ -35,21 +35,38 @@ async function until(client, predicate) {
   const aw = await until(a, (m) => m.t === "welcome");
   const bw = await until(b, (m) => m.t === "welcome");
   assert.notEqual(aw.id, bw.id);
+  assert.deepEqual(aw.mining, { mined: [], drops: [] });
   a.socket.send(JSON.stringify({ t: "hello", name: "Alice", character: "ninja" }));
   b.socket.send(JSON.stringify({ t: "hello", name: "Bob", character: "mage" }));
   await until(a, (m) => m.t === "join" && m.player.name === "Bob");
   await until(b, (m) => m.t === "join" && m.player.name === "Alice");
   // Beyond the old 2600 px clamp: full world, attack counter, health and KO.
-  a.socket.send(JSON.stringify({ t: "state", x: 7000, gap: 80, f: -1, n: 3, a: 0.5, hp: 0, d: true }));
+  a.socket.send(JSON.stringify({ t: "state", x: 7000, gap: -30, f: -1, n: 3, a: 0.5, hp: 0, d: true }));
   const snapshot = await until(b, (m) => m.t === "snapshot" && m.p.some((p) => p.id === aw.id && p.n === 3));
   const remote = snapshot.p.find((p) => p.id === aw.id);
   assert.equal(remote.x, 7000);
+  assert.equal(remote.gap, -30);
   assert.equal(remote.hp, 0);
   assert.equal(remote.d, true);
   assert.equal(remote.a, 0.5);
+
+  a.socket.send(JSON.stringify({ t: "mineBlock", column: 12, row: 0, serial: 1 }));
+  const minedByA = await until(a, (m) => m.t === "mineBlock" && m.dropId === aw.id + ":1");
+  const minedByB = await until(b, (m) => m.t === "mineBlock" && m.dropId === aw.id + ":1");
+  assert.equal(minedByA.ownerId, aw.id);
+  assert.equal(minedByB.column, 12);
+  assert.equal(minedByB.row, 0);
+
+  // Le premier joueur à toucher le drop le réclame : le serveur confirme à tous.
+  b.socket.send(JSON.stringify({ t: "minePickup", dropId: aw.id + ":1" }));
+  const pickedByA = await until(a, (m) => m.t === "minePickup" && m.dropId === aw.id + ":1");
+  const pickedByB = await until(b, (m) => m.t === "minePickup" && m.dropId === aw.id + ":1");
+  assert.equal(pickedByA.collectorId, bw.id);
+  assert.equal(pickedByB.collectorId, bw.id);
+
   a.socket.close();
   await until(b, (m) => m.t === "leave" && m.id === aw.id);
-  console.log("server.test.js : deux connexions indépendantes, déplacements, attaques, vie, KO, départ : ok");
+  console.log("server.test.js : connexions, états verticaux, minage partagé, collecte, vie, KO, départ : ok");
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {
   clients.forEach((client) => client.terminate());
   server.kill();
