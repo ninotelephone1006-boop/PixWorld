@@ -130,7 +130,12 @@ async function testOnlineGame() {
   net.rename("Alice", "mage");
   check("le changement de héros est transmis", socket.sent[2] && socket.sent[2].t === "rename" && socket.sent[2].character === "mage");
 
-  socket.onmessage({ data: JSON.stringify({ t: "welcome", id: "p1", players: [{ id: "p2", name: "Bob", character: "mage" }] }) });
+  net.mineBlock(12, 4, 7);
+  net.pickupDrop("p1:7");
+  check("le bloc miné est transmis au serveur", socket.sent[3] && socket.sent[3].t === "mineBlock" && socket.sent[3].column === 12 && socket.sent[3].row === 4 && socket.sent[3].serial === 7);
+  check("la demande de ramassage est transmise", socket.sent[4] && socket.sent[4].t === "minePickup" && socket.sent[4].dropId === "p1:7");
+
+  socket.onmessage({ data: JSON.stringify({ t: "welcome", id: "p1", players: [{ id: "p2", name: "Bob", character: "mage" }], mining: { mined: [], drops: [] } }) });
   socket.onmessage({ data: JSON.stringify({ t: "snapshot", p: [{ id: "p2", x: 400, gap: 30, f: -1, vx: 0, vy: 0, g: false, a: 0, hp: 55 }] }) });
   socket.onmessage({ data: JSON.stringify({ t: "leave", id: "p2" }) });
 

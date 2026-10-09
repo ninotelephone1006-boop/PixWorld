@@ -96,6 +96,15 @@ Les touffes d'herbe posées sur le sol réagissent au passage des personnages, l
 
 Les touffes sont posées sur le relief de la prairie. L'herbe du premier plan, au bas de l'écran, reste décorative. Sauter au-dessus d'une touffe ne la fait pas bouger, et une marche trop lente ne produit ni son ni brin. Au repos, le rendu est identique à celui du décor d'origine. La logique est dans `src/grass.js`, séparée du dessin et du son.
 
+## Minage 2D et inventaire
+
+Le terrain de chaque colonne est une grille de blocs carrés de **30 × 30 px** : **1 couche d'herbe**, **4 couches de terre**, puis **10 couches de pierre**. Le joueur fait 60 px de haut dans sa boîte de collision : **2 blocs correspondent donc exactement à sa hauteur**. Les textures pixel art de l'herbe, de la terre et de la pierre sont des adaptations du pack CC0 « Pixel Platformer » de Kenney (source GitHub et licence dans `assets/CREDITS.md`).
+
+- Le bloc visé par la souris reçoit un contour lumineux. Maintiens le clic gauche sur le même bloc pendant **2 secondes** : les fissures progressent, puis le bloc casse et laisse tomber un petit item.
+- Touche un item pour l'ajouter automatiquement à ton inventaire. Les quantités sont personnelles ; dans l'arène en ligne, le terrain cassé et les drops sont synchronisés, et le premier joueur qui touche un drop le récupère.
+- La barre verticale de raccourcis, au **milieu du bord droit**, affiche les trois blocs et leurs quantités. Fais défiler la molette (ou utilise `1`, `2`, `3`) pour changer d'emplacement ; tu peux aussi cliquer sur un emplacement.
+- Les modifications du terrain sont gardées en mémoire par le serveur de l'arène ; elles sont partagées par les joueurs connectés et disparaissent lors d'un redémarrage du serveur. Sans connexion, le minage fonctionne localement dans l'onglet.
+
 ## Effets sonores
 
 Le jeu mélange deux sources, derrière une seule API (`src/audio.js`) :
@@ -139,7 +148,9 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `A` (AZERTY) ou `Q` (QWERTY), ou flèche gauche : aller à gauche
 - `D` ou flèche droite : aller à droite
 - `Espace` : sauter
-- `X` ou clic gauche : lancer l'attaque du héros (le clic choisit aussi la direction)
+- `X` : lancer l'attaque du héros
+- Clic gauche sur un bloc : miner (maintenir 2 secondes) ; clic dans le vide : attaque du héros
+- Molette (ou `1` / `2` / `3`) : sélectionner l'emplacement de raccourci
 - `Échap` : ouvrir le menu pause / reprendre
 - `M` : couper / rétablir le son
 
@@ -148,7 +159,9 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `index.html` — canvas, HUD et structure de l'écran titre.
 - `assets/menu.css` — menu animé et responsive, sélection des héros et écran pause.
 - `src/characters.js` — catalogue des combattants : feuille de sprite, réglages de combat (dégâts, recul, délai du projectile) et sons de chaque héros.
-- `src/game.js` — boucle de jeu, spritesheets, barres de vie, combat (recul, K.O., combo), effets d'attaque, interpolation des joueurs distants et touffes d'herbe du sol.
+- `src/game.js` — boucle de jeu, spritesheets, barres de vie, combat (recul, K.O., combo), effets d'attaque, minage, drops, inventaire et interpolation des joueurs distants.
+- `src/mining.js` — grille de blocs (herbe, terre, pierre), temps de minage, collisions de surface, drops physiques et inventaire (`window.PixWorldMining`).
+- `assets/blocks/` — textures pixel art CC0 des blocs minables et atlas source Kenney.
 - `src/effects.js` — particules (dont les brins d'herbe), chiffres de dégâts, ondes de choc, secousses de caméra, flashs et vignette.
 - `src/world.js` — monde procédural : graine, biomes en bandes, relief, plateformes, décor placé et collisions (atterrissage, appui sur le relief).
 - `src/scenery.js` — rendu des biomes : textures de sol peintes à la volée, ciels, couches lointaines, surfaces (herbe, neige, cendre), décor, plateformes et particules d'ambiance.
@@ -159,9 +172,9 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `src/net.js` — WebSocket sur la même origine et reconnexion automatique.
 - `tools/make-sprites.py` — générateur (Pillow) des feuilles de sprites originales de Sora et Raiden.
 - `tools/build-sfx.mjs` — récupère les sons CC0 sur GitHub, les adapte (mono, 44,1 kHz, silences coupés, 0,8 s max) et régénère `assets/sfx/` + `src/sfx-library.js`.
-- `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz, sans conserver de données. Il écoute sur toutes les interfaces et fournit `/healthz` pour le déploiement.
+- `server/server.js` — serveur de fichiers statiques et WebSocket sans dépendance ; relaie les états à 20 Hz et synchronise les blocs minés / les drops dans l'arène (état en mémoire). Il écoute sur toutes les interfaces et fournit `/healthz` pour le déploiement.
 
-Chaque client envoie sa position, son animation, son personnage, ses points de vie, son état de K.O. et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde est généré à partir d'une graine commune (environ 8 300 px de large) et partagé par tous. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné et un joueur muet pendant plus de 20 s est déconnecté.
+Chaque client envoie sa position, son animation, son personnage, ses points de vie, son état de K.O. et son compteur d'attaque 20 fois par seconde. Les positions distantes sont interpolées pour rester fluides. Le monde est généré à partir d'une graine commune. Côté serveur, les pseudos sont nettoyés, les héros sont validés par liste autorisée, les nombres sont bornés, le débit est plafonné, le terrain miné et les drops actifs restent en mémoire, et un joueur muet pendant plus de 20 s est déconnecté.
 
 ## Tests
 
@@ -169,7 +182,7 @@ Chaque client envoie sa position, son animation, son personnage, ses points de v
 npm test
 ```
 
-Les tests (sans dépendance) vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio — synthèse de chaque preset, lecture des pas d'herbe dédiés, décodage des fichiers et repli synthèse avec un faux navigateur (`test/audio.test.js`), l'intégrité et la correspondance des sources de la banque de sons (`test/sfx-bank.test.js`), le moteur d'effets visuels, brins compris (`test/effects.test.js`), le monde procédural — graine, biomes, marchabilité du relief, plateformes atteignables et atterrissages (`test/world.test.js`), le rendu des biomes sur un contexte factice (`test/scenery.test.js`), l'herbe interactive — pose des touffes, courbure et retour au repos, froissements espacés, brins occasionnels (`test/grass.test.js`) — et vérifient la connexion automatique, la reconnexion, les erreurs et la synchronisation des héros / attaques (`test/net.test.js`).
+Les tests vérifient le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, inventaire et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage des drops (`test/net.test.js`, `test/server.test.js`).
 
 ## Sprites et décor
 
