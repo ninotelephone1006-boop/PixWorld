@@ -117,4 +117,62 @@ assert.equal(arena.breakBlock(2, arena.layerCount - 1), null, "La roche mère ne
 // Inventaire : dépenser puis rembourser.
 assert.equal(arena.spendBlock("stone"), false, "Rien à dépenser sans collecte");
 
+// ─────────── Les drops ne traversent jamais les blocs ───────────
+const HALF = Mining.constants.DROP_SIZE / 2;
+const dropOverlapsSolid = (mine, drop) => {
+  const bs = mine.blockSize;
+  const c0 = Math.floor((drop.x - HALF) / bs);
+  const c1 = Math.floor((drop.x + HALF - 0.001) / bs);
+  const r0 = Math.floor((drop.depth - HALF) / bs);
+  const r1 = Math.floor((drop.depth + HALF - 0.001) / bs);
+  for (let row = r0; row <= r1; row++) {
+    for (let column = c0; column <= c1; column++) {
+      if (mine.solidAt(column, row)) return true;
+    }
+  }
+  return false;
+};
+const simulateDrops = (mine, seconds) => {
+  const steps = Math.ceil(seconds * 60);
+  for (let i = 0; i < steps; i++) mine.updateDrops(1 / 60, baseY);
+};
+
+// Un drop né sous une plateforme posée tombe dans le trou et s'y arrête :
+// il ne traverse pas les blocs jusqu'au fond du monde.
+const under = Mining.create({ worldWidth: 96, blockSize: 32 });
+under.placeBlock(0, -1, "stone");
+under.breakBlock(0, 0, { baseY, dropId: "local:under", networked: false });
+simulateDrops(under, 3);
+let resting = under.getDrops()[0];
+assert.ok(resting, "Le drop existe encore après la chute");
+assert.equal(dropOverlapsSolid(under, resting), false, "Le drop ne chevauche aucun bloc");
+assert.ok(Math.abs(baseY + resting.depth + HALF - (baseY + 32)) < 0.01, "Le drop repose sur le bloc sous le trou");
+
+// Un drop dans un puits profond repose sur la roche mère.
+const pit = Mining.create({ worldWidth: 96, blockSize: 32 });
+for (let row = 0; row < pit.layerCount - 2; row++) pit.breakBlock(0, row, { baseY, createDrop: false });
+pit.breakBlock(0, pit.layerCount - 2, { baseY, dropId: "local:pit", networked: false });
+simulateDrops(pit, 3);
+resting = pit.getDrops()[0];
+assert.ok(resting, "Le drop du puits existe encore");
+assert.equal(dropOverlapsSolid(pit, resting), false, "Le drop du puits ne chevauche aucun bloc");
+assert.ok(Math.abs(baseY + resting.depth + HALF - (baseY + (pit.layerCount - 1) * 32)) < 0.01, "Le drop repose sur la roche mère");
+
+// Un drop lancé contre un mur est stoppé par le mur : pas de traversée latérale.
+let lateral = null;
+for (let n = 0; n < 500 && !lateral; n++) {
+  const candidate = Mining.create({ worldWidth: 96, blockSize: 32 });
+  for (let row = 0; row < 2; row++) candidate.breakBlock(0, row, { baseY, createDrop: false });
+  candidate.breakBlock(0, 2, { baseY, dropId: "local:vx" + n, networked: false });
+  const first = candidate.getDrops()[0];
+  if (first && first.vx > 35) lateral = candidate;
+}
+assert.ok(lateral, "Un drop avec une forte dérive latérale existe");
+simulateDrops(lateral, 3);
+resting = lateral.getDrops()[0];
+assert.ok(resting, "Le drop latéral existe encore");
+assert.equal(dropOverlapsSolid(lateral, resting), false, "Le drop ne traverse pas le mur voisin");
+assert.ok(resting.x <= 32 - HALF + 0.01, "Le drop est resté contre le mur");
+assert.ok(Math.abs(baseY + resting.depth + HALF - (baseY + 96)) < 0.01, "Le drop repose au fond du trou");
+
 console.log("mining.test.js : terrain, couches, minage, collisions, drops, inventaire et synchronisation : ok");
