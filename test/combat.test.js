@@ -44,12 +44,18 @@ function moveRight(game, frames) {
   game.fire("keyup", { code: "KeyD", key: "d" });
 }
 
-function peerAttack(game, id, character, serial, x, facing, gap = 0) {
+function peerAttack(game, id, character, serial, x, facing, gap = 0, cursor) {
   const hero = game.browser.sandbox.PixWorldCharacters.get(character);
-  game.emit({ t: "snapshot", p: [{
+  const state = {
     id, name: id, character, c: character, x, gap, f: facing,
     vx: 0, vy: 0, g: gap === 0, a: hero.attackDuration, n: serial, hp: 100, d: false,
-  }] });
+  };
+  // Curseur partagé (repère monde) : c'est lui qui donne la direction du tir.
+  if (cursor) {
+    state.cx = cursor.x;
+    state.cy = cursor.y;
+  }
+  game.emit({ t: "snapshot", p: [state] });
 }
 
 function wall(game) {
@@ -127,6 +133,23 @@ try {
     assert.equal(game.dbg.player.hp, 100 - hero.attackDamage, "Le tir reprend ses dégâts après destruction du mur");
     game.browser.dispose();
   }
+
+  // Un tir distant vise le curseur partagé de son auteur : un archer perché,
+  // de dos (f = -1), descend quand même son projectile sur nous.
+  const aimed = createGame();
+  const me = aimed.dbg.player;
+  peerAttack(aimed, "sniper", "archer", 1, me.x + 260, -1, 220, { x: me.x + 21, y: me.y + 30 });
+  aimed.browser.runFrames(90);
+  assert.equal(aimed.dbg.player.hp, 100 - aimed.browser.sandbox.PixWorldCharacters.get("archer").attackDamage,
+    "le projectile d'un autre joueur part vers son curseur, pas vers son orientation");
+  aimed.browser.dispose();
+
+  // Sans curseur partagé, ce même tir de dos passe à côté de nous.
+  const blindShot = createGame();
+  peerAttack(blindShot, "sniper", "archer", 1, blindShot.dbg.player.x + 260, -1, 220);
+  blindShot.browser.runFrames(90);
+  assert.equal(blindShot.dbg.player.hp, 100, "sans curseur, le tir garde le sens du corps de son auteur");
+  blindShot.browser.dispose();
 
   // La ligne de vue de la coupe s'applique aux dégâts et aux confirmations locales.
   const melee = createGame();

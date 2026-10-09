@@ -43,6 +43,18 @@ function createGame(options) {
         preventDefault() {},
       }, props));
     },
+    /** Touche enfoncée, en mémorisant si le jeu l'a avalée (preventDefault). */
+    press(props) {
+      const event = Object.assign({
+        type: "keydown",
+        target: canvas,
+        repeat: false,
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+      }, props);
+      browser.sandbox.dispatchEvent(event);
+      return event;
+    },
     point(x, y) {
       browser.sandbox.dispatchEvent({
         type: "pointermove",
@@ -88,16 +100,33 @@ try {
   assert.equal(game.dbg.player.x, beforeTyping, "on n'avance pas en écrivant un message");
   assert.equal(game.dbg.player.grounded, true, "on ne saute pas en écrivant un message");
 
+  // La barre d'espace doit arriver jusqu'au champ de saisie : sans ça, aucune
+  // commande à arguments n'est tapable (« /tp "Nom Joueur" "Autre Joueur" »).
+  game.fire("keydown", { code: "KeyT", key: "t" });
+  const typed = game.press({ code: "Space", key: " ", target: game.el("#chat-input") });
+  assert.equal(typed.defaultPrevented, false, "l'espace tapé dans le champ de saisie n'est pas avalé");
+  const swallowed = game.press({ code: "Space", key: " " });
+  assert.equal(swallowed.defaultPrevented, true, "l'espace hors du champ reste neutralisé (ni saut ni défilement)");
+  game.browser.runFrames(6);
+  assert.equal(game.dbg.player.grounded, true, "écrire un message ne fait toujours pas sauter");
+
   game.write("Salut tout le monde");
   const sent = game.sentChat();
   assert.equal(sent.length, 1, "Entrée envoie une seule ligne");
   assert.equal(sent[0].text, "Salut tout le monde");
   assert.equal(game.dbg.chat.open, false, "la discussion se referme après l'envoi");
 
+  // Une commande garde ses espaces et ses guillemets jusqu'au serveur.
+  game.fire("keydown", { code: "KeyT", key: "t" });
+  game.write('/tp "Le Bricoleur" "Ami Joueur"');
+  assert.equal(game.sentChat().at(-1).text, '/tp "Le Bricoleur" "Ami Joueur"',
+    "une commande garde ses espaces et ses guillemets");
+
   // Une ligne vide ne part pas, et une ligne trop longue est coupée.
+  const beforeEmpty = game.sentChat().length;
   game.fire("keydown", { code: "KeyT", key: "t" });
   game.write("   ");
-  assert.equal(game.sentChat().length, 1, "une ligne vide n'est pas envoyée");
+  assert.equal(game.sentChat().length, beforeEmpty, "une ligne vide n'est pas envoyée");
   game.fire("keydown", { code: "KeyT", key: "t" });
   game.write("a".repeat(200));
   assert.equal(game.sentChat().at(-1).text.length, 140, "une ligne est limitée à 140 caractères");

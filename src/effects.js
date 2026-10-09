@@ -214,14 +214,21 @@ window.PixWorldEffects = (() => {
     }
 
     // ───────────────────────── Compositions ─────────────────────────
-    /** Traînée derrière un projectile en vol, selon son style. */
-    function trail(x, y, style, color, facing) {
+    /**
+     * Traînée derrière un projectile en vol, selon son style. `dir` porte la
+     * direction réelle du vol (dirX, dirY, angle) : un projectile qui vise le
+     * curseur ne file pas toujours à l'horizontale, sa traînée non plus.
+     */
+    function trail(x, y, style, color, facing, dir) {
+      const backX = dir && Number.isFinite(dir.dirX) ? -dir.dirX : -facing;
+      const backY = dir && Number.isFinite(dir.dirY) ? -dir.dirY : 0;
+      const angle = dir && Number.isFinite(dir.angle) ? dir.angle : (facing > 0 ? 0 : Math.PI);
       if (style === "shuriken") {
         particle({
           x,
           y: y + rand(-2, 2),
-          vx: -facing * rand(10, 40),
-          vy: rand(-8, 8),
+          vx: backX * rand(10, 40),
+          vy: backY * rand(10, 40) + rand(-8, 8),
           life: rand(0.14, 0.26),
           size: rand(2, 3.5),
           color: pick(["rgba(255,255,255,0.8)", withAlpha(color, 0.8)]),
@@ -230,25 +237,25 @@ window.PixWorldEffects = (() => {
         });
       } else if (style === "arrow") {
         particle({
-          x: x - facing * rand(6, 14),
-          y: y + rand(-3, 3),
-          vx: -facing * rand(20, 60),
-          vy: rand(-12, 12),
+          x: x + backX * rand(6, 14),
+          y: y + backY * rand(6, 14) + rand(-3, 3),
+          vx: backX * rand(20, 60),
+          vy: backY * rand(20, 60) + rand(-12, 12),
           life: rand(0.12, 0.22),
           size: rand(1.2, 2),
           color: pick(["rgba(255,255,255,0.75)", withAlpha(color, 0.7)]),
           shape: "spark",
           length: rand(6, 14),
-          rotation: facing > 0 ? 0 : Math.PI,
+          rotation: angle,
           fade: "linear",
         });
       } else if (style === "orb") {
-        const angle = rand(0, Math.PI * 2);
+        const scatter = rand(0, Math.PI * 2);
         particle({
-          x: x + Math.cos(angle) * 6,
-          y: y + Math.sin(angle) * 6,
-          vx: Math.cos(angle) * rand(10, 40) - facing * rand(20, 50),
-          vy: Math.sin(angle) * rand(10, 40) - 20,
+          x: x + Math.cos(scatter) * 6,
+          y: y + Math.sin(scatter) * 6,
+          vx: Math.cos(scatter) * rand(10, 40) + backX * rand(20, 50),
+          vy: Math.sin(scatter) * rand(10, 40) + backY * rand(20, 50) - 20,
           gravity: -40,
           life: rand(0.3, 0.6),
           size: rand(1.5, 3.5),

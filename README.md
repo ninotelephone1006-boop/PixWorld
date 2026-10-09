@@ -74,6 +74,8 @@ Quatre combattants ont chacun **leur propre feuille de sprite** (plus aucune tei
 
 Le choix du héros est synchronisé entre joueurs : sprites, mouvements, déclenchements d'attaque, points de vie et K.O. sont visibles par les autres. Le sprite se tourne vers le curseur (gauche / droite), même en marchant dans l'autre sens ; le regard suit aussi le défilement de la caméra. Sans curseur actif, notamment au toucher, il garde le sens de la marche.
 
+**Les projectiles visent le curseur.** Shuriken, flèche et orbe partent dans la direction du pointeur, pas seulement à gauche ou à droite : tu peux tirer en l'air, en diagonale ou vers le sol, et le projectile pivote dans son sens de vol (sa traînée aussi). Les tirs des autres joueurs suivent leur curseur partagé, et sans curseur connu (souris hors de la fenêtre, toucher) le tir file droit devant le personnage. Les blocs arrêtent toujours le projectile au premier contact, quelle que soit la trajectoire.
+
 ## Barre de vie
 
 Chaque joueur porte une **barre de vie** au-dessus de son personnage (et une petite jauge dans la liste des joueurs). Les attaques font de vrais dégâts :
@@ -159,7 +161,10 @@ La liste des événements et de leurs variantes est décrite dans `src/sfx-libra
 
 `T` ouvre la discussion en bas à gauche. `Entrée` envoie, `Échap` (ou un clic
 dans le monde) referme et rend la main au jeu ; le journal reste affiché
-quelques secondes après le dernier message.
+quelques secondes après le dernier message. Le clavier appartient alors au
+champ de saisie : on ne court pas, on ne saute pas et on n'attaque pas en
+écrivant, mais **la barre d'espace s'écrit normalement** — les commandes à
+plusieurs arguments sont donc tapables sans rien avaler.
 
 | Commande | Effet |
 | --- | --- |
@@ -226,7 +231,7 @@ npm test
 
 Le démarrage complet de la page est rejoué sans navigateur (`test/game-boot.test.js`) : chargement des scripts, quatre héros affichés, connexion à l'arène, entrée en jeu et arrivée d'un autre joueur — de quoi repérer immédiatement un script qui planterait au chargement.
 
-Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, quantités et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage unique du butin (`test/net.test.js`, `test/server.test.js`). Les scénarios de combat (`test/combat.test.js`) rejouent les quatre styles d'attaque face à un mur, la mort avec inventaire, la réapparition, les confirmations réseau tardives et la récupération du stuff hors ligne. Les entrées (`test/input.test.js`) couvrent la visée au curseur en marchant dans l'autre sens, le déplacement de caméra, le HUD, la pause et le toucher. La discussion (`test/chat.test.js`) rejoue la touche `T`, l'envoi d'une ligne, l'affichage des messages reçus, l'exécution des commandes `/tp` et `/kill`, le relais des curseurs et le repli hors ligne. Les tests de minage et de serveur vérifient aussi les trous rebouchés plusieurs fois et le minage maintenu lorsqu'un bloc est reposé entre deux images.
+Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, quantités et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage unique du butin (`test/net.test.js`, `test/server.test.js`). Les scénarios de combat (`test/combat.test.js`) rejouent les quatre styles d'attaque face à un mur, la mort avec inventaire, la réapparition, les confirmations réseau tardives et la récupération du stuff hors ligne. Les entrées (`test/input.test.js`) couvrent la visée au curseur en marchant dans l'autre sens, le déplacement de caméra, le HUD, la pause et le toucher, ainsi que la direction des projectiles (en diagonale, vers le bas, et sans curseur). La discussion (`test/chat.test.js`) rejoue la touche `T`, l'envoi d'une ligne - espaces et guillemets compris -, l'affichage des messages reçus, l'exécution des commandes `/tp` et `/kill`, le relais des curseurs et le repli hors ligne. Les tests de minage et de serveur vérifient aussi les trous rebouchés plusieurs fois et le minage maintenu lorsqu'un bloc est reposé entre deux images.
 
 ## Sprites et décor
 

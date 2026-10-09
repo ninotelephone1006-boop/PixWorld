@@ -380,6 +380,30 @@
     return { x: aimPointer.x + camX, y: aimPointer.y + camY };
   }
 
+  /**
+   * Curseur local en repère monde, secousse de caméra déduite : c'est le pixel
+   * réellement sous le pointeur, donc le point que le projectile doit viser.
+   */
+  function aimWorldPoint() {
+    if (!aimPointer.inside) return null;
+    return { x: aimPointer.x + camX - fx.shakeX, y: aimPointer.y + camY - fx.shakeY };
+  }
+
+  /**
+   * Direction unitaire d'une origine vers un point du monde. Sans curseur
+   * connu (souris absente, toucher), le projectile part droit devant le
+   * corps : clavier, manette et doigt tirent alors dans le sens de marche.
+   */
+  function aimDirection(originX, originY, targetX, targetY, fallbackFacing) {
+    const dx = Number(targetX) - originX;
+    const dy = Number(targetY) - originY;
+    const length = Math.hypot(dx, dy);
+    if (!Number.isFinite(length) || length < 4) {
+      return { x: fallbackFacing >= 0 ? 1 : -1, y: 0 };
+    }
+    return { x: dx / length, y: dy / length };
+  }
+
   /** Une teinte stable par joueur : son curseur se reconnaît au premier coup d'œil. */
   function cursorColorFor(peer) {
     let sum = 7;
@@ -1534,9 +1558,9 @@
     if (author && author !== identity.name) toast(author + " t'a éliminé.", true);
   }
 
-  function projectileTargetHit(projectile, x0, x1, x, y) {
+  function projectileTargetHit(projectile, x0, y0, x1, y1, x, y) {
     const margin = 8;
-    return window.PixWorldMining.segmentRectHit(x0, projectile.y, x1, projectile.y, {
+    return window.PixWorldMining.segmentRectHit(x0, y0, x1, y1, {
       x: x - margin, y: y - margin,
       width: player.width + margin * 2, height: player.height + margin * 2,
     });
@@ -1936,7 +1960,16 @@
       if (player.shotTimer <= 0) {
         player.shotTimer = -1;
         const origin = projectileOrigin(player.x, player.y, player.facing);
-        spawnProjectile(character, origin.x, origin.y, player.facing, character.accent, "self");
+        // Le projectile part vers le curseur, pas seulement à gauche ou à
+        // droite : on peut donc tirer en l'air, en diagonale ou vers le bas.
+        const aim = aimWorldPoint();
+        const direction = aimDirection(
+          origin.x, origin.y,
+          aim ? aim.x : origin.x + player.facing,
+          aim ? aim.y : origin.y,
+          player.facing,
+        );
+        spawnProjectile(character, origin.x, origin.y, direction, character.accent, "self");
         fx.muzzle(origin.x, origin.y, character.attackStyle, character.accent, player.facing);
         if (character.attackSound) sfx(character.attackSound);
         if (character.attackStyle === "arrow") sfx("arrowSwish", { volume: 0.6 });
@@ -2103,7 +2136,16 @@
           peer.shotTimer = -1;
           if (!peer.dead) {
             const origin = projectileOrigin(peer.rx, peer.ry, peer.f);
-            spawnProjectile(character, origin.x, origin.y, peer.f, character.accent, peer.id);
+            // Même visée chez les autres : leur curseur partagé donne la
+            // direction, avec un repli sur leur orientation sans curseur.
+            const aim = peer.cursorDraw || peer.cursor;
+            const direction = aimDirection(
+              origin.x, origin.y,
+              aim ? aim.x : origin.x + peer.f,
+              aim ? aim.y : origin.y,
+              peer.f,
+            );
+            spawnProjectile(character, origin.x, origin.y, direction, character.accent, peer.id);
             fx.muzzle(origin.x, origin.y, character.attackStyle, character.accent, peer.f);
             if (character.attackSound) sfxAt(character.attackSound, center.x);
             if (character.attackStyle === "arrow") sfxAt("arrowSwish", center.x, { volume: 0.5 });
@@ -2152,17 +2194,22 @@
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const projectile = projectiles[i];
       const x0 = projectile.x;
-      const x1 = x0 + projectile.speed * projectile.facing * Math.min(delta, Math.max(0, projectile.life));
+      const y0 = projectile.y;
+      // Vol rectiligne le long de la direction visée : le curseur peut être
+      // en l'air, au-dessus, en dessous ou en diagonale.
+      const step = projectile.speed * Math.min(delta, Math.max(0, projectile.life));
+      const x1 = x0 + projectile.dirX * step;
+      const y1 = y0 + projectile.dirY * step;
       projectile.age += delta;
       projectile.life -= delta;
 
       // Balayage continu : jamais de traversée d'un bloc entre deux images.
       // On choisit le premier contact (bloc ou joueur) ; le bloc gagne les
       // égalités, donc aucune victime derrière une paroi ne prend de dégâts.
-      let hit = mining.traceSolid(x0, projectile.y, x1, projectile.y, groundY, projectile.halfWidth, projectile.halfHeight);
+      let hit = mining.traceSolid(x0, y0, x1, y1, groundY, projectile.halfWidth, projectile.halfHeight);
       let target = null;
       if (projectile.owner !== "self" && player.deadTime === 0) {
-        const localHit = projectileTargetHit(projectile, x0, x1, player.x, player.y);
+        const localHit = projectileTargetHit(projectile, x0, y0, x1, y1, player.x, player.y);
         if (localHit && (!hit || localHit.t < hit.t)) {
           hit = localHit;
           target = "self";
@@ -2170,19 +2217,20 @@
       }
       others.forEach((peer) => {
         if (peer.dead || peer.id === projectile.owner) return;
-        const peerHit = projectileTargetHit(projectile, x0, x1, peer.rx, peer.ry);
+        const peerHit = projectileTargetHit(projectile, x0, y0, x1, y1, peer.rx, peer.ry);
         if (peerHit && (!hit || peerHit.t < hit.t)) {
           hit = peerHit;
           target = peer;
         }
       });
       projectile.x = hit ? hit.x : x1;
+      projectile.y = hit ? hit.y : y1;
 
       // Traînée : quelques particules par image selon le style.
       projectile.trailTimer -= delta;
       if (projectile.trailTimer <= 0) {
         projectile.trailTimer = projectile.style === "orb" ? 0.03 : 0.022;
-        fx.trail(projectile.x, projectile.y, projectile.style, projectile.color, projectile.facing);
+        fx.trail(projectile.x, projectile.y, projectile.style, projectile.color, projectile.facing, projectile);
       }
 
       if (hit) {
@@ -2209,7 +2257,11 @@
         projectiles.splice(i, 1);
         continue;
       }
-      if (projectile.life <= 0 || projectile.x < -80 || projectile.x > WORLD_WIDTH + 80) {
+      // Un tir raté disparaît à sa portée maximale, ou en sortant du monde
+      // (y compris par le haut ou sous le terrain, puisque la visée est libre).
+      if (projectile.life <= 0 ||
+          projectile.x < -80 || projectile.x > WORLD_WIDTH + 80 ||
+          projectile.y < -600 || projectile.y > groundY + mining.totalHeight + 320) {
         if (projectile.life <= 0) {
           fx.burst(projectile.x, projectile.y, { count: 5, colors: ["#ffffff", projectile.color], minSize: 1.5, maxSize: 3, maxSpeed: 90, gravity: 200 });
           sfxAt("fizzle", projectile.x, { volume: 0.5 });
@@ -2276,13 +2328,20 @@
     player.shotTimer = character.projectileDelay || 0;
   }
 
-  function spawnProjectile(character, x, y, facing, color, owner) {
+  function spawnProjectile(character, x, y, direction, color, owner) {
+    const dirX = direction && Number.isFinite(direction.x) ? direction.x : 1;
+    const dirY = direction && Number.isFinite(direction.y) ? direction.y : 0;
     projectiles.push({
       style: character.attackStyle,
       ...PROJECTILE_BOUNDS[character.attackStyle],
       x,
       y,
-      facing,
+      // Direction de vol (unitaire) et angle de dessin : le projectile file
+      // vers le curseur, dans toutes les directions.
+      dirX,
+      dirY,
+      angle: Math.atan2(dirY, dirX),
+      facing: dirX >= 0 ? 1 : -1,
       speed: character.projectileSpeed,
       age: 0,
       life: character.projectileLife,
@@ -2471,11 +2530,15 @@
   function drawProjectiles() {
     projectiles.forEach((projectile) => {
       const screenX = projectile.x - camX;
+      const screenY = projectile.y - camY;
       if (screenX < -70 || screenX > width + 70) return;
+      if (screenY < -90 || screenY > height + 90) return;
       const fade = clamp(projectile.life / Math.min(0.35, projectile.initialLife), 0, 1);
       ctx.save();
-      ctx.translate(Math.round(screenX), Math.round(projectile.y));
-      ctx.rotate(projectile.facing < 0 ? Math.PI : 0);
+      ctx.translate(Math.round(screenX), Math.round(screenY));
+      // Le projectile est orienté dans son sens de vol : la flèche pointe
+      // vraiment là où elle va, même en diagonale ou à la verticale.
+      ctx.rotate(Number.isFinite(projectile.angle) ? projectile.angle : 0);
       ctx.globalAlpha = fade;
 
       if (projectile.style === "arrow") {
@@ -3032,7 +3095,10 @@
     // Pendant la saisie, le clavier appartient à la discussion : on ne court
     // pas, on ne saute pas et on n'attaque pas en écrivant un message.
     if (chatOpen) {
-      if (event.code === "Space") event.preventDefault();
+      // L'espace reste neutralisé quand la discussion n'a pas le focus (elle
+      // ferait défiler la page), mais le champ de saisie doit pouvoir en
+      // recevoir : sans ça, aucune commande à arguments n'est tapable.
+      if (event.code === "Space" && !isTypingTarget(event.target)) event.preventDefault();
       return;
     }
     if ((event.code === "KeyM" || keyLabel === "m") && !event.repeat && !isTypingTarget(event.target)) {
@@ -3187,7 +3253,10 @@
   // de la caméra, du terrain et des combats (aucune mutation du jeu).
   window.PixWorldDebug = {
     get player() {
-      return { x: player.x, y: player.y, hp: player.hp, facing: player.facing, grounded: player.grounded, dead: player.deadTime > 0 };
+      return {
+        x: player.x, y: player.y, width: player.width, height: player.height,
+        hp: player.hp, facing: player.facing, grounded: player.grounded, dead: player.deadTime > 0,
+      };
     },
     get camX() { return camX; },
     get camY() { return camY; },
@@ -3195,7 +3264,8 @@
     placed: () => mining.getPlaced(),
     inventory: () => mining.inventory(),
     drops: () => mining.getDrops(),
-    projectiles: () => projectiles.map(({ style, x, y, owner }) => ({ style, x, y, owner })),
+    projectiles: () => projectiles.map(({ style, x, y, owner, dirX, dirY, angle, facing }) =>
+      ({ style, x, y, owner, dirX, dirY, angle, facing })),
     peers: () => Array.from(others.values(), ({ id, lastHitByUsAt }) => ({ id, lastHitByUsAt })),
     cursors: () => Array.from(others.values(), (peer) => ({
       id: peer.id,
