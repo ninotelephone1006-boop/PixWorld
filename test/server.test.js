@@ -80,9 +80,23 @@ async function until(client, predicate) {
   assert.equal(pickedByA.collectorId, bw.id);
   assert.equal(pickedByB.collectorId, bw.id);
 
+  // Un troisième joueur rejoint plus tard : il récupère le même terrain et les
+  // mêmes blocs posés, sans dépendre de l'origine ou du réseau de l'interface.
+  a.socket.send(JSON.stringify({ t: "placeBlock", column: 14, row: -1, type: "dirt", serial: 11 }));
+  await until(b, (m) => m.t === "placeBlock" && m.serial === 11);
+  const c = connect();
+  const cw = await until(c, (m) => m.t === "welcome");
+  assert.ok(cw.players.some((player) => player.id === aw.id));
+  assert.ok(cw.players.some((player) => player.id === bw.id));
+  assert.ok(cw.mining.mined.some(([column, row]) => column === 12 && row === 0));
+  assert.ok(!cw.mining.placed.some(([column]) => column === 13));
+  assert.ok(cw.mining.placed.some(([column, row, type]) => column === 14 && row === -1 && type === "dirt"));
+  assert.ok(cw.mining.drops.some((drop) => drop.id === aw.id + ":10"));
+  assert.ok(!cw.mining.drops.some((drop) => drop.id === aw.id + ":1"));
+
   a.socket.close();
   await until(b, (m) => m.t === "leave" && m.id === aw.id);
-  console.log("server.test.js : connexions, états verticaux, minage partagé, collecte, vie, KO, départ : ok");
+  console.log("server.test.js : arène commune, arrivées tardives, positions, terrain, collecte, combat et départ : ok");
 })().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {
   clients.forEach((client) => client.terminate());
   server.kill();
