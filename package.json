@@ -1,0 +1,16 @@
+{
+  "name": "pixworld",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Prototype de jeu de plateforme 2D multijoueur en HTML Canvas",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js",
+    "test": "node test/net.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["jeu", "canvas", "multijoueur", "websocket"],
+  "license": "MIT"
+}

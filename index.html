@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#58a6e8" />
-    <title>PixWorld — Prototype 2D</title>
+    <title>PixWorld — Prototype 2D multijoueur</title>
     <style>
       :root {
         color-scheme: dark;
@@ -159,6 +159,350 @@
         user-select: none;
       }
 
+      /* ----- Petite UI multijoueur : liste des joueurs connectés ----- */
+
+      .players {
+        position: absolute;
+        top: clamp(18px, 4vw, 34px);
+        right: clamp(18px, 4vw, 36px);
+        width: 210px;
+        max-width: calc(100vw - 36px);
+        padding: 10px 11px 11px;
+        border: 1px solid rgb(255 255 255 / 20%);
+        border-radius: 14px;
+        background: rgb(13 44 78 / 46%);
+        backdrop-filter: blur(10px);
+        box-shadow: 0 12px 30px rgb(11 38 66 / 22%);
+        color: #fff;
+        font-size: 12px;
+      }
+
+      .players[hidden] {
+        display: none;
+      }
+
+      .players-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .players-title {
+        margin: 0;
+        flex: 1;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        color: rgb(255 255 255 / 82%);
+      }
+
+      .players-mode {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 7px;
+        border-radius: 999px;
+        background: rgb(255 255 255 / 12%);
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgb(255 255 255 / 78%);
+      }
+
+      .players-mode::before {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #7ee39a;
+        box-shadow: 0 0 0 3px rgb(126 227 154 / 18%);
+        content: "";
+      }
+
+      .players[data-mode="local"] .players-mode::before {
+        background: #ffbf67;
+        box-shadow: 0 0 0 3px rgb(255 191 103 / 18%);
+      }
+
+      .players[data-mode="solo"] .players-mode::before {
+        background: #9fb0c2;
+        box-shadow: 0 0 0 3px rgb(159 176 194 / 16%);
+      }
+
+      .players-rename {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border: 1px solid rgb(255 255 255 / 18%);
+        border-radius: 8px;
+        background: rgb(255 255 255 / 8%);
+        color: rgb(255 255 255 / 80%);
+        font-size: 12px;
+        line-height: 1;
+        cursor: pointer;
+      }
+
+      .players-rename:hover {
+        background: rgb(255 255 255 / 16%);
+        color: #fff;
+      }
+
+      .players-list {
+        display: grid;
+        gap: 4px;
+        max-height: 168px;
+        margin: 0;
+        padding: 0;
+        overflow-y: auto;
+        list-style: none;
+      }
+
+      .players-list li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 6px;
+        border-radius: 9px;
+        background: rgb(255 255 255 / 6%);
+      }
+
+      .players-list .is-self {
+        background: rgb(255 191 103 / 16%);
+        box-shadow: inset 0 0 0 1px rgb(255 191 103 / 28%);
+      }
+
+      .players-list .swatch {
+        flex: none;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        box-shadow: 0 0 0 2px rgb(255 255 255 / 22%);
+      }
+
+      .players-list .name {
+        flex: 1;
+        overflow: hidden;
+        font-weight: 700;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .players-list .self-tag {
+        flex: none;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: rgb(255 255 255 / 55%);
+      }
+
+      /* ----- Notifications d'arrivée / départ ----- */
+
+      .toasts {
+        position: absolute;
+        left: 50%;
+        bottom: clamp(18px, 4vw, 30px);
+        display: grid;
+        gap: 6px;
+        justify-items: center;
+        transform: translateX(-50%);
+        pointer-events: none;
+      }
+
+      .toast {
+        padding: 7px 13px;
+        border: 1px solid rgb(255 255 255 / 18%);
+        border-radius: 999px;
+        background: rgb(13 44 78 / 62%);
+        backdrop-filter: blur(8px);
+        color: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        white-space: nowrap;
+        animation: toast-in 0.22s ease-out;
+      }
+
+      .toast.fade {
+        opacity: 0;
+        transition: opacity 0.35s ease, transform 0.35s ease;
+        transform: translateY(6px);
+      }
+
+      @keyframes toast-in {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      /* ----- Écran de pseudo, avant de commencer ----- */
+
+      .join {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        display: grid;
+        padding: 18px;
+        place-items: center;
+        background: rgb(8 28 50 / 52%);
+        backdrop-filter: blur(7px);
+      }
+
+      .join[hidden] {
+        display: none;
+      }
+
+      .join-card {
+        width: min(360px, 100%);
+        padding: 20px 20px 18px;
+        border: 1px solid rgb(255 255 255 / 20%);
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgb(19 58 96 / 92%), rgb(12 40 70 / 94%));
+        box-shadow: 0 24px 60px rgb(6 24 44 / 38%);
+        color: #fff;
+      }
+
+      .join-title {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .join-subtitle {
+        margin: 6px 0 16px;
+        color: rgb(255 255 255 / 68%);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .join-field {
+        display: grid;
+        gap: 7px;
+      }
+
+      .join-label {
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: rgb(255 255 255 / 62%);
+      }
+
+      .join-input {
+        width: 100%;
+        padding: 11px 13px;
+        border: 1px solid rgb(255 255 255 / 22%);
+        border-radius: 11px;
+        outline: none;
+        background: rgb(255 255 255 / 9%);
+        color: #fff;
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .join-input::placeholder {
+        color: rgb(255 255 255 / 40%);
+      }
+
+      .join-input:focus {
+        border-color: rgb(255 191 103 / 70%);
+        box-shadow: 0 0 0 3px rgb(255 191 103 / 18%);
+      }
+
+      .join-colors {
+        display: flex;
+        gap: 9px;
+        margin-top: 15px;
+      }
+
+      .join-color {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: 2px solid transparent;
+        border-radius: 50%;
+        outline: none;
+        cursor: pointer;
+        transition: transform 0.12s ease;
+      }
+
+      .join-color:hover {
+        transform: scale(1.08);
+      }
+
+      .join-color[aria-pressed="true"] {
+        border-color: #fff;
+        box-shadow: 0 0 0 3px rgb(255 255 255 / 18%);
+      }
+
+      .join-submit {
+        width: 100%;
+        margin-top: 18px;
+        padding: 12px 14px;
+        border: 0;
+        border-radius: 12px;
+        background: #ffbf67;
+        color: #20364d;
+        font: inherit;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .join-submit:hover {
+        background: #ffcb85;
+      }
+
+      .join-status {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin: 12px 0 0;
+        color: rgb(255 255 255 / 62%);
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .join-status::before {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #7ee39a;
+        content: "";
+      }
+
+      .join-status[data-tone="local"]::before {
+        background: #ffbf67;
+      }
+
+      .join-status[data-tone="solo"]::before {
+        background: #9fb0c2;
+      }
+
+      .join-status[data-tone="wait"]::before {
+        background: #9fb0c2;
+        animation: pulse 1.1s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        50% {
+          opacity: 0.3;
+        }
+      }
+
       @media (max-width: 560px) {
         .controls {
           flex-wrap: wrap;
@@ -173,13 +517,32 @@
         .hint {
           font-size: 10px;
         }
+
+        .players {
+          top: auto;
+          bottom: clamp(18px, 4vw, 30px);
+          width: 172px;
+          padding: 8px 9px 9px;
+        }
+
+        .players-list {
+          max-height: 104px;
+        }
+
+        .toasts {
+          bottom: auto;
+          top: 14px;
+        }
       }
 
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,
         *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
           scroll-behavior: auto !important;
+          transition-duration: 0.001ms !important;
         }
       }
     </style>
@@ -205,393 +568,53 @@
         </div>
       </section>
 
+      <aside class="players" id="players" data-mode="solo" aria-live="polite" hidden>
+        <div class="players-head">
+          <h2 class="players-title">Joueurs</h2>
+          <span class="players-mode" id="players-mode">solo</span>
+          <button class="players-rename" id="players-rename" type="button" title="Changer de pseudo" aria-label="Changer de pseudo">✎</button>
+        </div>
+        <ul class="players-list" id="players-list"></ul>
+      </aside>
+
+      <div class="toasts" id="toasts" aria-live="polite"></div>
+
       <p class="hint">ESPACE SAUTE · X OU CLIC GAUCHE ATTAQUE</p>
+
+      <div class="join" id="join">
+        <form class="join-card" id="join-form" autocomplete="off">
+          <h2 class="join-title" id="join-title">Choisir un pseudo</h2>
+          <p class="join-subtitle">
+            Ton pseudo et ta couleur sont visibles par les autres joueurs présents sur la page, au-dessus de ton ninja et dans la liste en haut à droite.
+          </p>
+
+          <div class="join-field">
+            <label class="join-label" for="join-input">Pseudo</label>
+            <input
+              class="join-input"
+              id="join-input"
+              name="pseudo"
+              type="text"
+              maxlength="14"
+              placeholder="Ninja"
+              spellcheck="false"
+              autocomplete="off"
+              required
+            />
+          </div>
+
+          <div class="join-field">
+            <span class="join-label">Couleur</span>
+            <div class="join-colors" id="join-colors" role="group" aria-label="Couleur du ninja"></div>
+          </div>
+
+          <button class="join-submit" id="join-submit" type="submit">Commencer</button>
+          <p class="join-status" id="join-status" data-tone="wait">Connexion à la partie…</p>
+        </form>
+      </div>
     </main>
 
-    <script>
-      (() => {
-        const canvas = document.querySelector("#world");
-        const ctx = canvas.getContext("2d");
-        const keys = new Set();
-        const spriteSheet = new Image();
-        spriteSheet.src = "assets/ninja-black-32x32.png";
-
-        // Décor pixel art « Sunny Land » (Ansimuz, CC0) : ciel, collines et
-        // tuiles de sol, dessinés en parallaxe derrière le ninja.
-        const skyLayer = new Image();
-        skyLayer.src = "assets/background/sky-back.png";
-        const hillsLayer = new Image();
-        hillsLayer.src = "assets/background/hills-middle.png";
-        const tileset = new Image();
-        tileset.src = "assets/background/tileset.png";
-
-        const tileSize = 16;
-        const tileScale = 4;
-        const tileDraw = tileSize * tileScale;
-        const groundHeight = tileDraw * 2;
-        // Réglages des couches de parallaxe (facteur de défilement caméra).
-        const skyFactor = 0.1;
-        const hillsFactor = 0.32;
-        const foregroundFactor = 1.3;
-        // Tuiles de terre (variants) et touffes d'herbe dans la feuille.
-        const dirtTiles = [
-          [16, 48],
-          [80, 48],
-          [16, 80],
-          [48, 80],
-        ];
-        const grassTopTile = [48, 16];
-        const tuftTiles = [
-          [16, 115],
-          [48, 115],
-        ];
-        const frameSize = 32;
-        const spriteScale = 4;
-        const spriteDrawSize = frameSize * spriteScale;
-        const spriteTopPadding = 9 * spriteScale;
-        const attackDuration = 0.36;
-        const player = {
-          x: 112,
-          y: 0,
-          width: 42,
-          height: 60,
-          velocityX: 0,
-          velocityY: 0,
-          speed: 340,
-          jumpStrength: 700,
-          grounded: true,
-          facing: 1,
-          animationTime: 0,
-          attackTime: 0,
-          landingTime: 0,
-        };
-
-        let width = 0;
-        let height = 0;
-        let groundY = 0;
-        let lastTime = 0;
-        let worldWidth = 0;
-        let camX = 0;
-
-        // Petit hash déterministe pour varier terre et herbe sans aléatoire.
-        function hash(n) {
-          const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
-          return x - Math.floor(x);
-        }
-
-        function resize() {
-          const ratio = Math.min(window.devicePixelRatio || 1, 2);
-          const bounds = canvas.getBoundingClientRect();
-          width = bounds.width;
-          height = bounds.height;
-          canvas.width = Math.round(width * ratio);
-          canvas.height = Math.round(height * ratio);
-          ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-          ctx.imageSmoothingEnabled = false;
-          groundY = Math.max(0, height - groundHeight);
-          worldWidth = Math.max(width * 2, 1200);
-          player.x = Math.max(0, Math.min(worldWidth - player.width, player.x));
-          if (player.grounded) player.y = groundY - player.height;
-          draw();
-        }
-
-        function isLeftPressed() {
-          return (
-            keys.has("KeyQ") ||
-            keys.has("KeyA") ||
-            keys.has("q") ||
-            keys.has("a") ||
-            keys.has("ArrowLeft")
-          );
-        }
-
-        function isRightPressed() {
-          return keys.has("KeyD") || keys.has("d") || keys.has("ArrowRight");
-        }
-
-        function update(delta) {
-          player.animationTime += delta;
-          player.attackTime = Math.max(0, player.attackTime - delta);
-          player.landingTime = Math.max(0, player.landingTime - delta);
-
-          const direction = Number(isRightPressed()) - Number(isLeftPressed());
-          player.velocityX = direction * player.speed;
-          if (direction !== 0) player.facing = direction;
-          player.x += player.velocityX * delta;
-          player.x = Math.max(0, Math.min(worldWidth - player.width, player.x));
-
-          // Caméra qui suit le joueur, bornée au monde : c'est elle qui fait
-          // défiler les couches de parallaxe à des vitesses différentes.
-          const target = Math.max(
-            0,
-            Math.min(worldWidth - width, player.x + player.width / 2 - width / 2),
-          );
-          camX += (target - camX) * Math.min(1, delta * 10);
-
-          if (!player.grounded) {
-            player.velocityY += 1900 * delta;
-            player.y += player.velocityY * delta;
-
-            if (player.y + player.height >= groundY) {
-              player.y = groundY - player.height;
-              player.velocityY = 0;
-              player.grounded = true;
-              player.landingTime = 0.12;
-            }
-          }
-        }
-
-        function getSpriteFrame() {
-          if (player.attackTime > 0) {
-            const elapsed = attackDuration - player.attackTime;
-            const frame = Math.min(3, Math.floor(elapsed / (attackDuration / 4)));
-            return { column: 3, row: frame };
-          }
-
-          if (!player.grounded) {
-            return { column: 2, row: player.velocityY < 0 ? 0 : 1 };
-          }
-
-          if (player.landingTime > 0) {
-            return { column: 2, row: 2 };
-          }
-
-          if (Math.abs(player.velocityX) > 0.5) {
-            return { column: 1, row: Math.floor(player.animationTime * 10) % 4 };
-          }
-
-          return { column: 0, row: Math.floor(player.animationTime * 5) % 4 };
-        }
-
-        function drawPlayer() {
-          if (!spriteSheet.complete || spriteSheet.naturalWidth === 0) return;
-
-          const { column, row } = getSpriteFrame();
-          const sourceX = column * frameSize;
-          const sourceY = row * frameSize;
-          const centerX = player.x + player.width / 2 - camX;
-          const drawY = player.y - spriteTopPadding;
-
-          ctx.save();
-          ctx.translate(centerX, 0);
-          ctx.scale(player.facing, 1);
-          ctx.drawImage(
-            spriteSheet,
-            sourceX,
-            sourceY,
-            frameSize,
-            frameSize,
-            -spriteDrawSize / 2,
-            drawY,
-            spriteDrawSize,
-            spriteDrawSize,
-          );
-          ctx.restore();
-        }
-
-        // Répète horizontalement une image de décor, décalée par la caméra
-        // multipliée par le facteur de parallaxe de la couche.
-        function drawTiledLayer(img, factor, drawH, bottomY) {
-          const scale = drawH / img.height;
-          const drawW = img.width * scale;
-          if (!(drawW > 0)) return;
-          let off = (camX * factor) % drawW;
-          if (off < 0) off += drawW;
-          for (let x = -off; x < width; x += drawW) {
-            ctx.drawImage(img, x, bottomY - drawH, drawW, drawH);
-          }
-        }
-
-        function drawBackground() {
-          // Ciel de secours tant que les images ne sont pas chargées.
-          ctx.fillStyle = "#58a6e8";
-          ctx.fillRect(0, 0, width, height);
-
-          if (skyLayer.complete && skyLayer.naturalWidth > 0) {
-            drawTiledLayer(skyLayer, skyFactor, height, height);
-          }
-          if (hillsLayer.complete && hillsLayer.naturalWidth > 0) {
-            drawTiledLayer(hillsLayer, hillsFactor, height * 0.85, height);
-          }
-        }
-
-        function drawGround() {
-          if (!(tileset.complete && tileset.naturalWidth > 0)) {
-            // Sol gris de secours avant chargement de la feuille de tuiles.
-            ctx.fillStyle = "#858c94";
-            ctx.fillRect(0, groundY, width, height - groundY);
-            return;
-          }
-
-          const firstTile = Math.floor(camX / tileDraw);
-          const startX = -(camX % tileDraw);
-          const rows = Math.ceil((height - groundY) / tileDraw);
-          const tuftW = tileSize * 3;
-          const tuftH = 13 * 3;
-
-          for (let c = 0; startX + c * tileDraw < width; c++) {
-            const worldTile = firstTile + c;
-            const x = startX + c * tileDraw;
-
-            ctx.drawImage(
-              tileset,
-              grassTopTile[0],
-              grassTopTile[1],
-              tileSize,
-              tileSize,
-              x,
-              groundY,
-              tileDraw,
-              tileDraw,
-            );
-            for (let r = 1; r <= rows; r++) {
-              const dirt = dirtTiles[Math.floor(hash(worldTile * 7 + r * 131) * dirtTiles.length)];
-              ctx.drawImage(
-                tileset,
-                dirt[0],
-                dirt[1],
-                tileSize,
-                tileSize,
-                x,
-                groundY + r * tileDraw,
-                tileDraw,
-                tileDraw,
-              );
-            }
-
-            // Touffes d'herbe décoratives, posées de façon déterministe.
-            if (hash(worldTile + 999) < 0.2) {
-              const tuft = tuftTiles[Math.floor(hash(worldTile + 777) * tuftTiles.length)];
-              ctx.drawImage(
-                tileset,
-                tuft[0],
-                tuft[1],
-                tileSize,
-                13,
-                x + (tileDraw - tuftW) / 2,
-                groundY - tuftH + 4,
-                tuftW,
-                tuftH,
-              );
-            }
-          }
-        }
-
-        // Herbes au premier plan, défilant plus vite que le sol : renforce
-        // l'effet de profondeur de la parallaxe.
-        function drawForeground() {
-          if (!(tileset.complete && tileset.naturalWidth > 0)) return;
-          const tuftW = tileSize * 3;
-          const tuftH = 13 * 3;
-          const scroll = camX * foregroundFactor;
-          const firstTile = Math.floor(scroll / tuftW);
-          const startX = -(scroll % tuftW);
-
-          for (let c = 0; startX + c * tuftW < width; c++) {
-            const worldTile = firstTile + c;
-            if (hash(worldTile + 555) < 0.45) {
-              const tuft = tuftTiles[Math.floor(hash(worldTile + 313) * tuftTiles.length)];
-              ctx.drawImage(
-                tileset,
-                tuft[0],
-                tuft[1],
-                tileSize,
-                13,
-                startX + c * tuftW,
-                height - tuftH + 8,
-                tuftW,
-                tuftH,
-              );
-            }
-          }
-        }
-
-        function draw() {
-          ctx.clearRect(0, 0, width, height);
-
-          drawBackground();
-          drawGround();
-
-          // Ombre discrète pour ancrer le sprite au sol pendant le saut.
-          ctx.fillStyle = "rgba(23, 59, 91, 0.18)";
-          ctx.beginPath();
-          ctx.ellipse(
-            player.x + player.width / 2 - camX,
-            groundY + 7,
-            player.width * (player.grounded ? 0.58 : 0.42),
-            5,
-            0,
-            0,
-            Math.PI * 2,
-          );
-          ctx.fill();
-
-          drawPlayer();
-          drawForeground();
-        }
-
-        function frame(time) {
-          const delta = lastTime ? Math.min((time - lastTime) / 1000, 0.04) : 0;
-          lastTime = time;
-          update(delta);
-          draw();
-          requestAnimationFrame(frame);
-        }
-
-        window.addEventListener("keydown", (event) => {
-          const keyLabel = event.key.toLowerCase();
-          const controlCode = [
-            "KeyQ",
-            "KeyA",
-            "KeyD",
-            "ArrowLeft",
-            "ArrowRight",
-            "Space",
-            "KeyX",
-          ].includes(event.code);
-          const controlLabel = ["a", "q", "d", "x"].includes(keyLabel);
-          if (controlCode || controlLabel) event.preventDefault();
-
-          keys.add(event.code);
-          if (keyLabel.length === 1) keys.add(keyLabel);
-
-          if (event.code === "Space" && !event.repeat && player.grounded) {
-            player.velocityY = -player.jumpStrength;
-            player.grounded = false;
-          }
-
-          if (
-            (event.code === "KeyX" || keyLabel === "x") &&
-            !event.repeat &&
-            player.attackTime === 0
-          ) {
-            player.attackTime = attackDuration;
-          }
-        });
-
-        window.addEventListener("keyup", (event) => {
-          keys.delete(event.code);
-          keys.delete(event.key.toLowerCase());
-        });
-        window.addEventListener("blur", () => keys.clear());
-
-        // Clic gauche : attaque dans la direction du curseur.
-        window.addEventListener("pointerdown", (event) => {
-          if (event.button !== 0) return;
-          event.preventDefault();
-          const rect = canvas.getBoundingClientRect();
-          const clickX = event.clientX - rect.left;
-          const playerScreenX = player.x + player.width / 2 - camX;
-          if (Math.abs(clickX - playerScreenX) > 4) {
-            player.facing = clickX > playerScreenX ? 1 : -1;
-          }
-          if (player.attackTime === 0) player.attackTime = attackDuration;
-        });
-        window.addEventListener("resize", resize);
-
-        resize();
-        requestAnimationFrame(frame);
-      })();
-    </script>
+    <script src="src/net.js"></script>
+    <script src="src/game.js"></script>
   </body>
 </html>

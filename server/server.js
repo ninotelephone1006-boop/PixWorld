@@ -1,0 +1,387 @@
+/**
+ * Petit serveur PixWorld : fichiers statiques + WebSocket, sans dépendance.
+ *
+ *   npm start            → http://localhost:3000
+ *   PORT=8080 npm start  → autre port
+ *
+ * Le serveur ne fait que relayer les positions : chaque client envoie son
+ * état 20 fois par seconde et reçoit la position de tous les autres. Aucune
+ * donnée n'est conservée après la déconnexion.
+ */
+"use strict";
+
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+
+const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || "0.0.0.0";
+const ROOT = path.resolve(__dirname, "..");
+
+const TICK_MS = 50; // 20 snapshots par seconde
+const MAX_PLAYERS = 24;
+const MAX_MESSAGE_BYTES = 4096;
+const MAX_MESSAGES_PER_SECOND = 80;
+const IDLE_TIMEOUT_MS = 20000;
+const WORLD_WIDTH = 2600;
+
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".md": "text/markdown; charset=utf-8",
+};
+
+// ───────────────────────────── Fichiers statiques ─────────────────────────────
+
+const server = http.createServer((req, res) => {
+  let pathname;
+  try {
+    pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
+  } catch (error) {
+    res.writeHead(400).end("Bad request");
+    return;
+  }
+
+  if (pathname === "/players") {
+    const roster = Array.from(players.values())
+      .filter((p) => p.joined)
+      .map((p) => ({ name: p.name, color: p.color }));
+    res.writeHead(200, { "content-type": MIME[".json"], "cache-control": "no-store" });
+    res.end(JSON.stringify({ online: roster.length, players: roster }));
+    return;
+  }
+
+  if (pathname === "/") pathname = "/index.html";
+
+  // On refuse toute sortie du dossier du projet (../ etc.).
+  const filePath = path.join(ROOT, path.normalize(pathname));
+  if (!filePath.startsWith(ROOT + path.sep) && filePath !== path.join(ROOT, "index.html")) {
+    res.writeHead(403).end("Forbidden");
+    return;
+  }
+
+  fs.readFile(filePath, (error, data) => {
+    if (error) {
+      res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+      res.end("404 — introuvable");
+      return;
+    }
+    const type = MIME[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+    res.writeHead(200, { "content-type": type, "cache-control": "no-cache" });
+    res.end(data);
+  });
+});
+
+// ───────────────────────────── État des joueurs ─────────────────────────────
+
+/** id -> { id, name, color, socket, state, lastSeen, rate } */
+const players = new Map();
+let nextId = 1;
+
+function clampNumber(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function cleanName(raw) {
+  const text = String(raw == null ? "" : raw)
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 14);
+  return text || "Ninja";
+}
+
+function cleanColor(raw) {
+  return /^#[0-9a-fA-F]{6}$/.test(String(raw)) ? String(raw) : "#ff8a5c";
+}
+
+function send(socket, message) {
+  if (socket.destroyed || !socket.writable) return;
+  try {
+    socket.write(encodeFrame(JSON.stringify(message)));
+  } catch (error) {
+    /* socket partie : on ignore */
+  }
+}
+
+function broadcast(message, exceptId) {
+  players.forEach((player) => {
+    if (player.id !== exceptId) send(player.socket, message);
+  });
+}
+
+// ───────────────────────── WebSocket : handshake (RFC 6455) ─────────────────────────
+
+const WS_GUID = "258EAFA5-E914-47DA-95CA-5AB0DC85B11C";
+
+server.on("upgrade", (req, socket) => {
+  let pathname = "";
+  try {
+    pathname = new URL(req.url, "http://localhost").pathname;
+  } catch (error) {
+    socket.destroy();
+    return;
+  }
+
+  if (pathname !== "/ws") {
+    socket.destroy();
+    return;
+  }
+
+  const key = req.headers["sec-websocket-key"];
+  if (!key) {
+    socket.destroy();
+    return;
+  }
+
+  const accept = crypto.createHash("sha1").update(key + WS_GUID).digest("base64");
+  socket.write(
+    "HTTP/1.1 101 Switching Protocols\r\n" +
+      "Upgrade: websocket\r\n" +
+      "Connection: Upgrade\r\n" +
+      "Sec-WebSocket-Accept: " +
+      accept +
+      "\r\n\r\n",
+  );
+  socket.setNoDelay(true);
+  registerPlayer(socket);
+});
+
+function registerPlayer(socket) {
+  if (players.size >= MAX_PLAYERS) {
+    send(socket, { t: "full" });
+    socket.end();
+    return;
+  }
+
+  const id = "p" + nextId++;
+  const player = {
+    id,
+    name: "Ninja",
+    color: "#ff8a5c",
+    socket,
+    lastSeen: Date.now(),
+    joined: false, // devient vrai à la réception du "hello" (pseudo choisi)
+    messages: 0,
+    windowStart: Date.now(),
+    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0 },
+  };
+  players.set(id, player);
+
+  const roster = [];
+  players.forEach((other) => {
+    if (other.id !== id && other.joined) roster.push({ id: other.id, name: other.name, color: other.color });
+  });
+  send(socket, { t: "welcome", id, players: roster });
+  console.log("+ " + id + " connecté (" + players.size + " joueur(s))");
+
+  const handleFrame = createFrameHandler(player);
+  socket.on("data", (chunk) => {
+    try {
+      handleFrame(chunk);
+    } catch (error) {
+      socket.destroy();
+    }
+  });
+  socket.on("error", () => removePlayer(id));
+  socket.on("close", () => removePlayer(id));
+  socket.on("end", () => removePlayer(id));
+}
+
+function removePlayer(id) {
+  const player = players.get(id);
+  if (!player) return;
+  players.delete(id);
+  broadcast({ t: "leave", id });
+  console.log("- " + id + " déconnecté (" + players.size + " joueur(s))");
+}
+
+// ───────────────────────────── Messages entrants ─────────────────────────────
+
+function handleMessage(player, message) {
+  player.lastSeen = Date.now();
+
+  // Anti-flood : on compte les messages reçus dans la seconde écoulée.
+  const now = Date.now();
+  if (now - player.windowStart > 1000) {
+    player.windowStart = now;
+    player.messages = 0;
+  }
+  if (++player.messages > MAX_MESSAGES_PER_SECOND) return;
+
+  if (!message || typeof message !== "object") return;
+
+  if (message.t === "hello" || message.t === "rename") {
+    player.name = cleanName(message.name);
+    player.color = cleanColor(message.color);
+    const info = { id: player.id, name: player.name, color: player.color };
+    if (message.t === "hello") {
+      player.joined = true;
+      broadcast({ t: "join", player: info }, player.id);
+    } else {
+      broadcast({ t: "renamed", id: player.id, player: info }, player.id);
+    }
+    return;
+  }
+
+  if (message.t === "state") {
+    player.state = {
+      x: Math.round(clampNumber(message.x, 0, WORLD_WIDTH, player.state.x)),
+      gap: Math.round(clampNumber(message.gap, 0, 4000, 0)),
+      f: Number(message.f) < 0 ? -1 : 1,
+      vx: Math.round(clampNumber(message.vx, -4000, 4000, 0)),
+      vy: Math.round(clampNumber(message.vy, -4000, 4000, 0)),
+      g: Boolean(message.g),
+      a: clampNumber(message.a, 0, 1, 0),
+    };
+  }
+}
+
+// ───────────────────────────── Envoi des positions ─────────────────────────────
+
+setInterval(() => {
+  if (!players.size) return;
+  const snapshot = [];
+  const stale = [];
+  const now = Date.now();
+
+  players.forEach((player) => {
+    if (now - player.lastSeen > IDLE_TIMEOUT_MS) {
+      stale.push(player.id);
+      return;
+    }
+    // Tant que le pseudo n'est pas choisi, le joueur reste invisible.
+    if (player.joined) snapshot.push(Object.assign({ id: player.id }, player.state));
+  });
+
+  stale.forEach((id) => {
+    const player = players.get(id);
+    if (player) {
+      players.delete(id);
+      try {
+        player.socket.destroy();
+      } catch (error) {
+        /* déjà fermée */
+      }
+      broadcast({ t: "leave", id });
+    }
+  });
+
+  if (snapshot.length) broadcast({ t: "snapshot", p: snapshot });
+}, TICK_MS);
+
+// ───────────────────────── WebSocket : décodage des trames ─────────────────────────
+
+function encodeFrame(text, opcode) {
+  const payload = Buffer.from(text, "utf8");
+  const length = payload.length;
+  const code = opcode === undefined ? 0x1 : opcode;
+  let header;
+
+  if (length < 126) {
+    header = Buffer.alloc(2);
+    header[1] = length;
+  } else if (length < 65536) {
+    header = Buffer.alloc(4);
+    header[1] = 126;
+    header.writeUInt16BE(length, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(length), 2);
+  }
+  header[0] = 0x80 | code;
+  return Buffer.concat([header, payload]);
+}
+
+/**
+ * Décode les trames envoyées par le navigateur (toujours masquées).
+ * Renvoie une fonction à alimenter avec les paquets TCP reçus.
+ */
+function createFrameHandler(player) {
+  let buffer = Buffer.alloc(0);
+
+  return function feed(chunk) {
+    buffer = Buffer.concat([buffer, chunk]);
+
+    for (;;) {
+      if (buffer.length < 2) return;
+      const first = buffer[0];
+      const second = buffer[1];
+      const opcode = first & 0x0f;
+      const masked = (second & 0x80) !== 0;
+      let length = second & 0x7f;
+      let offset = 2;
+
+      if (length === 126) {
+        if (buffer.length < 4) return;
+        length = buffer.readUInt16BE(2);
+        offset = 4;
+      } else if (length === 127) {
+        if (buffer.length < 10) return;
+        const big = buffer.readBigUInt64BE(2);
+        if (big > BigInt(MAX_MESSAGE_BYTES)) throw new Error("trame trop grande");
+        length = Number(big);
+        offset = 10;
+      }
+
+      if (length > MAX_MESSAGE_BYTES) throw new Error("trame trop grande");
+      const maskLength = masked ? 4 : 0;
+      const frameEnd = offset + maskLength + length;
+      if (buffer.length < frameEnd) return;
+
+      let payload = Buffer.from(buffer.subarray(offset + maskLength, frameEnd));
+      if (masked) {
+        const mask = buffer.subarray(offset, offset + 4);
+        for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
+      }
+      buffer = buffer.subarray(frameEnd);
+
+      if (opcode === 0x8) {
+        // Demande de fermeture : on renvoie un acquittement et on coupe.
+        try {
+          player.socket.end(encodeFrame(Buffer.alloc(0), 0x8));
+        } catch (error) {
+          /* déjà fermée */
+        }
+        removePlayer(player.id);
+        return;
+      }
+      if (opcode === 0x9) {
+        // Ping : on répond pong avec le même contenu.
+        try {
+          player.socket.write(encodeFrame(payload, 0xa));
+        } catch (error) {
+          /* déjà fermée */
+        }
+        continue;
+      }
+      if (opcode !== 0x1) continue; // on ignore le binaire et les continuations
+
+      let message;
+      try {
+        message = JSON.parse(payload.toString("utf8"));
+      } catch (error) {
+        continue;
+      }
+      handleMessage(player, message);
+    }
+  };
+}
+
+server.listen(PORT, HOST, () => {
+  console.log("PixWorld — http://localhost:" + PORT + " (websocket sur /ws)");
+});
