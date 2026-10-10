@@ -1188,10 +1188,556 @@
   }
 }
 
+/* Réglages de trajectoire accessibles depuis le HUD pendant la partie. */
+.projectile-settings-overlay {
+  position: absolute;
+  z-index: 14;
+  inset: 0;
+  display: grid;
+  padding: clamp(12px, 3vw, 34px);
+  place-items: center;
+  overflow: auto;
+  background: rgb(5 13 28 / 68%);
+  backdrop-filter: blur(7px) saturate(0.78);
+  color: #f5f7ff;
+  animation: settings-shade-in 180ms ease-out both;
+}
+
+.projectile-settings-overlay[hidden] {
+  display: none;
+}
+
+.projectile-settings-panel {
+  display: flex;
+  width: min(850px, 100%);
+  max-height: min(850px, calc(100dvh - 30px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgb(212 229 255 / 20%);
+  border-radius: 23px;
+  background:
+    radial-gradient(ellipse at 90% 0%, rgb(79 121 180 / 14%), transparent 42%),
+    linear-gradient(145deg, rgb(18 34 58 / 99%), rgb(9 19 36 / 99%));
+  box-shadow: 0 30px 90px rgb(0 0 0 / 55%), inset 0 1px rgb(255 255 255 / 7%);
+  animation: settings-panel-in 240ms cubic-bezier(0.18, 0.8, 0.24, 1) both;
+}
+
+.projectile-settings-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 22px;
+  padding: 23px 26px 17px;
+  border-bottom: 1px solid rgb(210 226 255 / 10%);
+}
+
+.settings-kicker {
+  margin: 0 0 6px;
+  color: #ffd16e;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.17em;
+}
+
+.projectile-settings-header h2 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(20px, 3vw, 26px);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.settings-intro {
+  max-width: 620px;
+  margin: 7px 0 0;
+  color: rgb(231 239 255 / 62%);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.settings-close {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 6%);
+  color: rgb(255 255 255 / 82%);
+  font: inherit;
+  font-size: 25px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.settings-close:hover {
+  transform: rotate(90deg);
+  background: rgb(255 255 255 / 13%);
+  color: #fff;
+}
+
+.settings-close:focus-visible,
+.settings-character-tab:focus-visible,
+.settings-reset:focus-visible,
+.settings-done:focus-visible {
+  outline: 2px solid #ffd16e;
+  outline-offset: 3px;
+}
+
+.settings-character-tabs {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  padding: 13px 25px;
+  border-bottom: 1px solid rgb(210 226 255 / 9%);
+}
+
+.settings-character-tab {
+  display: flex;
+  min-width: 0;
+  min-height: 39px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 4%);
+  color: rgb(238 244 255 / 66%);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.settings-character-tab:hover {
+  transform: translateY(-1px);
+  background: rgb(255 255 255 / 8%);
+  color: #fff;
+}
+
+.settings-character-tab[aria-selected="true"] {
+  border-color: color-mix(in srgb, var(--hero-accent, #ffd16e) 64%, transparent);
+  background: color-mix(in srgb, var(--hero-accent, #ffd16e) 14%, rgb(255 255 255 / 4%));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--hero-accent, #ffd16e) 16%, transparent);
+  color: #fff;
+}
+
+.settings-tab-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--hero-accent, #ffd16e);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--hero-accent, #ffd16e) 55%, transparent);
+}
+
+.settings-character-summary {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 26px;
+  border-bottom: 1px solid rgb(210 226 255 / 9%);
+}
+
+.settings-character-icon {
+  display: grid;
+  width: 35px;
+  height: 35px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--hero-accent, #ffd16e) 44%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--hero-accent, #ffd16e) 13%, transparent);
+  color: var(--hero-accent, #ffd16e);
+  font-size: 17px;
+}
+
+.settings-character-summary > div {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.settings-character-summary h3 {
+  margin: 0;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.settings-character-summary p {
+  margin: 3px 0 0;
+  color: rgb(229 237 255 / 54%);
+  font-size: 10px;
+}
+
+.settings-reset {
+  min-height: 31px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border: 1px solid rgb(255 255 255 / 13%);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 5%);
+  color: rgb(238 244 255 / 75%);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.settings-reset:hover {
+  border-color: rgb(255 209 110 / 40%);
+  background: rgb(255 209 110 / 10%);
+  color: #fff;
+}
+
+.projectile-settings-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgb(173 195 230 / 25%) transparent;
+  scrollbar-width: thin;
+}
+
+.settings-projectile-controls,
+.settings-display-controls {
+  padding: 18px 26px 17px;
+}
+
+.settings-display-controls {
+  border-top: 1px solid rgb(210 226 255 / 9%);
+  background: rgb(255 255 255 / 1.5%);
+}
+
+.settings-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 13px;
+}
+
+.settings-section-heading h3 {
+  margin: 0;
+  color: rgb(247 249 255 / 94%);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.settings-section-heading p {
+  margin: 4px 0 0;
+  color: rgb(225 235 255 / 48%);
+  font-size: 9px;
+}
+
+.settings-section-tag {
+  color: rgb(255 255 255 / 39%);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.13em;
+  white-space: nowrap;
+}
+
+.settings-control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.settings-range {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 11px 12px 9px;
+  border: 1px solid rgb(221 233 255 / 9%);
+  border-radius: 11px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.settings-range-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: rgb(245 248 255 / 82%);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.settings-range-heading output {
+  color: #ffd16e;
+  font-size: 9px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.settings-range input[type="range"] {
+  width: 100%;
+  height: 14px;
+  margin: 0;
+  accent-color: #ffd16e;
+  cursor: pointer;
+}
+
+.settings-range input[type="range"]:focus-visible,
+.settings-switch-row input:focus-visible + .settings-switch {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}
+
+.settings-range-hint {
+  color: rgb(223 234 255 / 42%);
+  font-size: 8px;
+  line-height: 1.25;
+}
+
+.settings-melee-note {
+  margin: 0 26px 18px;
+  padding: 14px 16px;
+  border: 1px solid rgb(255 107 115 / 26%);
+  border-radius: 11px;
+  background: rgb(255 107 115 / 8%);
+  color: rgb(255 238 240 / 84%);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.settings-melee-note[hidden],
+.settings-projectile-controls[hidden] {
+  display: none;
+}
+
+.settings-switch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.settings-switch-row {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid rgb(221 233 255 / 9%);
+  border-radius: 11px;
+  background: rgb(255 255 255 / 3%);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.settings-switch-row:hover {
+  border-color: rgb(221 233 255 / 18%);
+  background: rgb(255 255 255 / 5%);
+}
+
+.settings-switch-row > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.settings-switch-row strong {
+  color: rgb(246 248 255 / 86%);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.settings-switch-row small {
+  color: rgb(224 233 252 / 43%);
+  font-size: 8px;
+  line-height: 1.3;
+}
+
+.settings-switch-row input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.settings-switch {
+  position: relative;
+  display: block;
+  width: 33px;
+  height: 19px;
+  flex: 0 0 auto;
+  border: 1px solid rgb(255 255 255 / 17%);
+  border-radius: 20px;
+  background: rgb(0 0 0 / 24%);
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.settings-switch::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: rgb(234 240 255 / 58%);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 30%);
+  content: "";
+  transition: transform 0.16s ease, background 0.16s ease;
+}
+
+.settings-switch-row input:checked + .settings-switch {
+  border-color: rgb(255 209 110 / 67%);
+  background: rgb(255 209 110 / 28%);
+}
+
+.settings-switch-row input:checked + .settings-switch::after {
+  transform: translateX(14px);
+  background: #ffd16e;
+}
+
+.settings-preview-range {
+  grid-column: 1 / -1;
+}
+
+.settings-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 12px 26px 15px;
+  border-top: 1px solid rgb(210 226 255 / 10%);
+  background: rgb(0 0 0 / 10%);
+}
+
+.settings-footer > span {
+  color: rgb(225 235 255 / 44%);
+  font-size: 9px;
+}
+
+.settings-done {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 14px;
+  border: 1px solid rgb(255 209 110 / 55%);
+  border-radius: 9px;
+  background: linear-gradient(135deg, #ffe19a, #ffc565);
+  box-shadow: 0 6px 18px rgb(255 188 94 / 15%);
+  color: #382510;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.settings-done:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+@keyframes settings-shade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes settings-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 600px) {
+  .projectile-settings-overlay {
+    padding: 9px;
+    place-items: center;
+  }
+
+  .projectile-settings-panel {
+    max-height: calc(100dvh - 18px);
+    border-radius: 17px;
+  }
+
+  .projectile-settings-header {
+    gap: 12px;
+    padding: 17px 16px 13px;
+  }
+
+  .settings-intro {
+    max-width: 42ch;
+    font-size: 10px;
+  }
+
+  .settings-character-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 10px 15px;
+  }
+
+  .settings-character-summary {
+    flex-wrap: wrap;
+    gap: 9px;
+    padding: 12px 16px;
+  }
+
+  .settings-character-summary > div {
+    flex-basis: calc(100% - 50px);
+  }
+
+  .settings-reset {
+    margin-left: 44px;
+  }
+
+  .settings-projectile-controls,
+  .settings-display-controls {
+    padding: 14px 15px;
+  }
+
+  .settings-control-grid,
+  .settings-switch-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-preview-range {
+    grid-column: auto;
+  }
+
+  .settings-melee-note {
+    margin: 0 15px 14px;
+  }
+
+  .settings-footer {
+    padding: 10px 15px 12px;
+  }
+
+  .settings-footer > span {
+    max-width: 27ch;
+    line-height: 1.35;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .game-menu *,
   .game-menu *::before,
-  .game-menu *::after {
+  .game-menu *::after,
+  .projectile-settings-overlay *,
+  .projectile-settings-overlay *::before,
+  .projectile-settings-overlay *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;

@@ -24,6 +24,7 @@ const fs = require("fs");
 const vm = require("vm");
 const path = require("path");
 const crypto = require("crypto");
+const PROJECTILE_PHYSICS = require("../src/projectile-physics.js");
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -407,7 +408,7 @@ function registerPlayer(socket) {
     windowStart: Date.now(),
     lastDeathDropSerial: -1,
     chatTimes: [],
-    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0, hp: 100, d: false, cx: null, cy: null },
+    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0, hp: 100, d: false, cx: null, cy: null, projectile: PROJECTILE_PHYSICS.normalize("ninja") },
   };
   players.set(id, player);
 
@@ -470,6 +471,7 @@ function handleMessage(player, message) {
   }
 
   if (message.t === "state") {
+    const character = cleanCharacter(message.c || player.character);
     player.state = {
       x: Math.round(clampNumber(message.x, 0, WORLD_WIDTH, player.state.x)),
       gap: Math.round(clampNumber(message.gap, -MINING.TOTAL_HEIGHT - 600, 4000, 0)),
@@ -478,13 +480,14 @@ function handleMessage(player, message) {
       vy: Math.round(clampNumber(message.vy, -4000, 4000, 0)),
       g: Boolean(message.g),
       a: clampNumber(message.a, 0, 1, 0),
-      c: cleanCharacter(message.c || player.character),
+      c: character,
       n: Math.floor(clampNumber(message.n, 0, 2147483647, player.state.n || 0)),
       hp: Math.round(clampNumber(message.hp, 0, 100, player.state.hp == null ? 100 : player.state.hp)),
       d: Boolean(message.d), // K.O. en cours : les autres jouent l'animation
       // Curseur en repère monde (null : la souris a quitté la fenêtre).
       cx: message.cx == null ? null : Math.round(clampNumber(message.cx, -4000, WORLD_WIDTH + 4000, 0)),
       cy: message.cy == null ? null : Math.round(clampNumber(message.cy, -12000, 12000, 0)),
+      projectile: character === "samurai" ? null : PROJECTILE_PHYSICS.normalize(character, message.projectile),
     };
     return;
   }

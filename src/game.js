@@ -56,6 +56,7 @@
   const featuredPreview = document.querySelector("#menu-featured-preview");
   const featuredPreviewContext = featuredPreview.getContext("2d");
   const CHARACTERS = window.PixWorldCharacters;
+  const PROJECTILE_PHYSICS = window.PixWorldProjectilePhysics;
   const characterPreviews = [];
 
   const playersPanel = document.querySelector("#players");
@@ -71,6 +72,35 @@
   const chatInput = document.querySelector("#chat-input");
   const hotbar = document.querySelector("#hotbar");
   const hotbarSlots = Array.from(document.querySelectorAll(".hotbar-slot"));
+  const settingsToggle = document.querySelector("#settings-toggle");
+  const projectileSettingsOverlay = document.querySelector("#projectile-settings");
+  const settingsClose = document.querySelector("#settings-close");
+  const settingsDone = document.querySelector("#settings-done");
+  const settingsTabs = document.querySelector("#settings-character-tabs");
+  const settingsCharacterIcon = document.querySelector("#settings-character-icon");
+  const settingsCharacterName = document.querySelector("#settings-character-name");
+  const settingsCharacterDescription = document.querySelector("#settings-character-description");
+  const settingsProjectileControls = document.querySelector("#settings-projectile-controls");
+  const settingsMeleeNote = document.querySelector("#settings-melee-note");
+  const settingsReset = document.querySelector("#settings-reset");
+  const settingsTrajectoryPreview = document.querySelector("#settings-trajectory-preview");
+  const settingsProjectileTrails = document.querySelector("#settings-projectile-trails");
+  const settingsPreviewDuration = document.querySelector("#settings-preview-duration");
+  const settingsPreviewDurationValue = document.querySelector("#settings-preview-duration-value");
+  const projectileSettingInputs = {
+    speed: document.querySelector("#settings-projectile-speed"),
+    gravity: document.querySelector("#settings-projectile-gravity"),
+    gravityDelay: document.querySelector("#settings-projectile-delay"),
+    life: document.querySelector("#settings-projectile-life"),
+    scale: document.querySelector("#settings-projectile-scale"),
+  };
+  const projectileSettingOutputs = {
+    speed: document.querySelector("#settings-projectile-speed-value"),
+    gravity: document.querySelector("#settings-projectile-gravity-value"),
+    gravityDelay: document.querySelector("#settings-projectile-delay-value"),
+    life: document.querySelector("#settings-projectile-life-value"),
+    scale: document.querySelector("#settings-projectile-scale-value"),
+  };
   const hotbarCounts = {
     grass: document.querySelector("#count-grass"),
     dirt: document.querySelector("#count-dirt"),
@@ -88,6 +118,7 @@
 
   const STORAGE_NAME = "pixworld.name";
   const STORAGE_CHARACTER = "pixworld.character";
+  const STORAGE_PROJECTILE_SETTINGS = "pixworld.projectile-settings";
   const FONT_STACK = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 
   // Points de vie : barre au-dessus de chaque joueur, dégâts des attaques.
@@ -254,8 +285,16 @@
   let sendTimer = 0;
   let menuMode = "start";
   let selectedCharacter = "ninja";
+  let selectedSettingsCharacter = "ninja";
+  let settingsOpen = false;
   let lastPanelHp = MAX_HP;
   const projectiles = [];
+  const gameSettings = {
+    projectiles: Object.create(null),
+    trajectoryPreview: false,
+    previewDuration: 2,
+    showTrails: true,
+  };
   const aimPointer = { x: 0, y: 0, inside: false }; // visée indépendante des clics de minage / du HUD
   const miningPointer = { x: 0, y: 0, inside: false, down: false, pointerId: null };
   let miningTargetKey = null;
@@ -298,6 +337,44 @@
     } catch (error) {
       /* stockage indisponible : ce n'est pas grave */
     }
+  }
+
+  function loadGameSettings() {
+    let saved = {};
+    try {
+      saved = JSON.parse(stored(STORAGE_PROJECTILE_SETTINGS, "{}")) || {};
+    } catch (error) {
+      saved = {};
+    }
+    const savedProjectiles = saved.projectiles && typeof saved.projectiles === "object"
+      ? saved.projectiles
+      : {};
+    CHARACTERS.list.forEach((character) => {
+      if (character.attackStyle === "slash") return;
+      gameSettings.projectiles[character.id] = PROJECTILE_PHYSICS.normalize(
+        character.id,
+        savedProjectiles[character.id],
+      );
+    });
+    gameSettings.trajectoryPreview = saved.trajectoryPreview === true;
+    gameSettings.showTrails = saved.showTrails !== false;
+    const previewDuration = Number(saved.previewDuration);
+    gameSettings.previewDuration = Number.isFinite(previewDuration)
+      ? clamp(previewDuration, 0.4, 4)
+      : 2;
+  }
+
+  function saveGameSettings() {
+    remember(STORAGE_PROJECTILE_SETTINGS, JSON.stringify({
+      projectiles: gameSettings.projectiles,
+      trajectoryPreview: gameSettings.trajectoryPreview,
+      previewDuration: gameSettings.previewDuration,
+      showTrails: gameSettings.showTrails,
+    }));
+  }
+
+  function projectileSettingsFor(characterId) {
+    return gameSettings.projectiles[characterId] || PROJECTILE_PHYSICS.normalize(characterId);
   }
 
   function clamp(value, min, max) {
@@ -493,6 +570,103 @@
       characterRoster.append(card);
       characterPreviews.push({ canvas: art, context: art.getContext("2d"), character });
     });
+  }
+
+  function buildSettingsTabs() {
+    CHARACTERS.list.forEach((character) => {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "settings-character-tab";
+      tab.dataset.character = character.id;
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", "false");
+      tab.setAttribute("aria-label", "Réglages de " + character.name + " · " + character.attackName);
+      tab.style.setProperty("--hero-accent", character.accent);
+      const dot = document.createElement("span");
+      dot.className = "settings-tab-dot";
+      dot.setAttribute("aria-hidden", "true");
+      const name = document.createElement("span");
+      name.textContent = character.name;
+      tab.append(dot, name);
+      tab.addEventListener("click", () => selectSettingsCharacter(character.id, true));
+      tab.addEventListener("pointerenter", () => {
+        if (tab.getAttribute("aria-selected") !== "true") sfx("uiHover", { volume: 0.45 });
+      });
+      settingsTabs.append(tab);
+    });
+  }
+
+  function formatProjectileSetting(key, value) {
+    if (key === "speed") return Math.round(value) + " px/s";
+    if (key === "gravity") return Math.round(value) + " px/s²";
+    if (key === "scale") return Math.round(value * 100) + " %";
+    const digits = key === "life" ? 1 : 2;
+    return Number(value).toFixed(digits).replace(".", ",") + " s";
+  }
+
+  function updateSettingsPanel() {
+    const character = characterFor(selectedSettingsCharacter);
+    const hasProjectile = character.attackStyle !== "slash";
+    settingsCharacterIcon.style.setProperty("--hero-accent", character.accent);
+    settingsCharacterIcon.textContent = character.attackStyle === "slash" ? "⚔" : "✦";
+    settingsCharacterName.textContent = character.name + " · " + character.attackName;
+    settingsCharacterDescription.textContent = character.attackDescription;
+    settingsTabs.querySelectorAll(".settings-character-tab").forEach((tab) => {
+      tab.setAttribute("aria-selected", String(tab.dataset.character === selectedSettingsCharacter));
+    });
+    settingsProjectileControls.hidden = !hasProjectile;
+    settingsMeleeNote.hidden = hasProjectile;
+    settingsReset.disabled = !hasProjectile;
+
+    if (hasProjectile) {
+      const physics = projectileSettingsFor(character.id);
+      Object.keys(projectileSettingInputs).forEach((key) => {
+        projectileSettingInputs[key].value = String(physics[key]);
+        projectileSettingOutputs[key].textContent = formatProjectileSetting(key, physics[key]);
+      });
+    }
+    settingsTrajectoryPreview.checked = gameSettings.trajectoryPreview;
+    settingsProjectileTrails.checked = gameSettings.showTrails;
+    settingsPreviewDuration.value = String(gameSettings.previewDuration);
+    settingsPreviewDurationValue.textContent = formatProjectileSetting("life", gameSettings.previewDuration);
+  }
+
+  function selectSettingsCharacter(id, withSound) {
+    selectedSettingsCharacter = cleanCharacter(id);
+    updateSettingsPanel();
+    if (withSound) sfx("uiSelect", { volume: 0.5 });
+  }
+
+  function updateProjectileSetting(key) {
+    const character = characterFor(selectedSettingsCharacter);
+    if (character.attackStyle === "slash" || !projectileSettingInputs[key]) return;
+    const current = projectileSettingsFor(character.id);
+    gameSettings.projectiles[character.id] = PROJECTILE_PHYSICS.normalize(character.id, {
+      ...current,
+      [key]: Number(projectileSettingInputs[key].value),
+    });
+    saveGameSettings();
+    updateSettingsPanel();
+  }
+
+  function updateDisplaySetting(key, value) {
+    if (key === "trajectoryPreview") gameSettings.trajectoryPreview = Boolean(value);
+    else if (key === "showTrails") gameSettings.showTrails = Boolean(value);
+    else if (key === "previewDuration") {
+      const parsed = Number(value);
+      gameSettings.previewDuration = Number.isFinite(parsed) ? clamp(parsed, 0.4, 4) : 2;
+    }
+    saveGameSettings();
+    updateSettingsPanel();
+  }
+
+  function resetSelectedProjectileSettings() {
+    const character = characterFor(selectedSettingsCharacter);
+    if (character.attackStyle === "slash") return;
+    gameSettings.projectiles[character.id] = PROJECTILE_PHYSICS.normalize(character.id);
+    saveGameSettings();
+    updateSettingsPanel();
+    sfx("uiBack", { volume: 0.6 });
   }
 
   function updateCharacterCards() {
@@ -713,7 +887,7 @@
   }
 
   function openChat() {
-    if (!playing || chatOpen) return;
+    if (!playing || chatOpen || settingsOpen) return;
     chatOpen = true;
     chatInput.value = "";
     chatPanel.classList.add("is-open");
@@ -785,6 +959,44 @@
     });
   }
 
+  function openProjectileSettings() {
+    if (!playing || settingsOpen || chatOpen) return;
+    settingsOpen = true;
+    selectedSettingsCharacter = cleanCharacter(identity.character);
+    updateSettingsPanel();
+    projectileSettingsOverlay.hidden = false;
+    settingsToggle.setAttribute("aria-expanded", "true");
+    settingsToggle.setAttribute("aria-pressed", "true");
+    settingsToggle.setAttribute("aria-label", "Fermer les paramètres");
+    settingsToggle.title = "Fermer les paramètres (Échap)";
+    keys.clear();
+    resetMiningInput();
+    aimPointer.inside = false;
+    sfx("uiSelect", { volume: 0.55 });
+    settingsClose.focus({ preventScroll: true });
+  }
+
+  function closeProjectileSettings(silent) {
+    if (!settingsOpen) return;
+    settingsOpen = false;
+    projectileSettingsOverlay.hidden = true;
+    settingsToggle.setAttribute("aria-expanded", "false");
+    settingsToggle.setAttribute("aria-pressed", "false");
+    settingsToggle.setAttribute("aria-label", "Ouvrir les paramètres");
+    settingsToggle.title = "Ouvrir les paramètres (P)";
+    keys.clear();
+    aimPointer.inside = false;
+    if (!silent) sfx("uiBack", { volume: 0.55 });
+    if (playing && settingsToggle && typeof settingsToggle.focus === "function") {
+      settingsToggle.focus({ preventScroll: true });
+    }
+  }
+
+  function toggleProjectileSettings() {
+    if (settingsOpen) closeProjectileSettings();
+    else openProjectileSettings();
+  }
+
   function syncMenuFromIdentity() {
     menuNameInput.value = identity.name;
     selectedCharacter = cleanCharacter(identity.character);
@@ -792,6 +1004,7 @@
   }
 
   function openMenu(mode) {
+    if (settingsOpen) closeProjectileSettings(true);
     menuMode = mode === "pause" ? "pause" : "start";
     playing = false;
     setHotbarVisible(false);
@@ -943,6 +1156,29 @@
 
   menuClose.addEventListener("click", resumeGame);
   menuHome.addEventListener("click", returnToTitle);
+  settingsToggle.addEventListener("click", toggleProjectileSettings);
+  settingsClose.addEventListener("click", () => closeProjectileSettings());
+  settingsDone.addEventListener("click", () => closeProjectileSettings());
+  settingsReset.addEventListener("click", resetSelectedProjectileSettings);
+  projectileSettingsOverlay.addEventListener("click", (event) => {
+    if (event.target === projectileSettingsOverlay) closeProjectileSettings();
+  });
+  Object.keys(projectileSettingInputs).forEach((key) => {
+    projectileSettingInputs[key].addEventListener("input", () => updateProjectileSetting(key));
+    projectileSettingInputs[key].addEventListener("change", () => sfx("uiSelect", { volume: 0.35 }));
+  });
+  settingsTrajectoryPreview.addEventListener("change", () => {
+    updateDisplaySetting("trajectoryPreview", settingsTrajectoryPreview.checked);
+    sfx("uiSelect", { volume: 0.45 });
+  });
+  settingsProjectileTrails.addEventListener("change", () => {
+    updateDisplaySetting("showTrails", settingsProjectileTrails.checked);
+    sfx("uiSelect", { volume: 0.45 });
+  });
+  settingsPreviewDuration.addEventListener("input", () => {
+    updateDisplaySetting("previewDuration", settingsPreviewDuration.value);
+  });
+  settingsPreviewDuration.addEventListener("change", () => sfx("uiSelect", { volume: 0.35 }));
   playersRename.addEventListener("click", () => {
     sfx("uiPause");
     openMenu("pause");
@@ -959,7 +1195,7 @@
   });
   chatInput.addEventListener("input", () => sfx("uiType", { volume: 0.5 }));
   if (menuServerCopy) menuServerCopy.addEventListener("click", copyServerAddress);
-  [menuClose, menuHome, playersRename, menuForm.querySelector(".menu-primary")].forEach((button) => {
+  [menuClose, menuHome, playersRename, settingsToggle, settingsClose, settingsDone, settingsReset, menuForm.querySelector(".menu-primary")].forEach((button) => {
     if (button) button.addEventListener("pointerenter", () => sfx("uiHover", { volume: 0.5 }));
   });
   if (soundToggle) soundToggle.addEventListener("click", toggleMute);
@@ -1132,12 +1368,17 @@
     if (existing) {
       existing.name = cleanName(data.name);
       existing.character = cleanCharacter(data.character || data.c || existing.character);
+      existing.projectile = existing.character === "samurai"
+        ? null
+        : PROJECTILE_PHYSICS.normalize(existing.character, data.projectile);
       return false;
     }
+    const character = cleanCharacter(data.character || data.c);
     others.set(data.id, {
       id: data.id,
       name: cleanName(data.name),
-      character: cleanCharacter(data.character || data.c),
+      character,
+      projectile: character === "samurai" ? null : PROJECTILE_PHYSICS.normalize(character, data.projectile),
       hp: MAX_HP,
       hpKnown: false,
       dead: false,
@@ -1190,6 +1431,9 @@
       peer.character = nextCharacter;
       panelDirty = true;
     }
+    peer.projectile = nextCharacter === "samurai"
+      ? null
+      : PROJECTILE_PHYSICS.normalize(nextCharacter, state.projectile);
     if (state.name && cleanName(state.name) !== peer.name) {
       peer.name = cleanName(state.name);
       panelDirty = true;
@@ -1656,6 +1900,10 @@
   }
 
   function updateAimPointer(event) {
+    if (settingsOpen) {
+      aimPointer.inside = false;
+      return;
+    }
     // Le toucher n'a pas de curseur persistant : garder le sens de la marche.
     if (event.pointerType === "touch") {
       aimPointer.inside = false;
@@ -1824,7 +2072,7 @@
   function updateMining(delta) {
     if (playing) {
       mining.updateDrops(delta, groundY);
-      if (player.deadTime === 0) {
+      if (!settingsOpen && player.deadTime === 0) {
         const target = currentMiningTarget();
         if (miningPointer.down && target) {
           if (target.key !== miningTargetKey) {
@@ -1857,7 +2105,7 @@
   }
 
   function update(delta) {
-    if (playing) {
+    if (playing && !settingsOpen) {
       player.animationTime += delta;
       player.attackTime = Math.max(0, player.attackTime - delta);
       player.landingTime = Math.max(0, player.landingTime - delta);
@@ -1935,6 +2183,7 @@
         d: player.deadTime > 0,
         cx: cursor ? Math.round(cursor.x) : null,
         cy: cursor ? Math.round(cursor.y) : null,
+        projectile: gameSettings.projectiles[identity.character] || null,
       });
     }
   }
@@ -1969,7 +2218,7 @@
           aim ? aim.y : origin.y,
           player.facing,
         );
-        spawnProjectile(character, origin.x, origin.y, direction, character.accent, "self");
+        spawnProjectile(character, origin.x, origin.y, direction, character.accent, "self", projectileSettingsFor(character.id));
         fx.muzzle(origin.x, origin.y, character.attackStyle, character.accent, player.facing);
         if (character.attackSound) sfx(character.attackSound);
         if (character.attackStyle === "arrow") sfx("arrowSwish", { volume: 0.6 });
@@ -2145,7 +2394,7 @@
               aim ? aim.y : origin.y,
               peer.f,
             );
-            spawnProjectile(character, origin.x, origin.y, direction, character.accent, peer.id);
+            spawnProjectile(character, origin.x, origin.y, direction, character.accent, peer.id, peer.projectile);
             fx.muzzle(origin.x, origin.y, character.attackStyle, character.accent, peer.f);
             if (character.attackSound) sfxAt(character.attackSound, center.x);
             if (character.attackStyle === "arrow") sfxAt("arrowSwish", center.x, { volume: 0.5 });
@@ -2190,45 +2439,99 @@
     return { x: x + player.width / 2 + facing * 18, y: y + player.height * 0.46 };
   }
 
+  const PROJECTILE_STEP_SECONDS = 1 / 120;
+
+  /** Durée d'une sous-étape courte, coupée précisément au début de la gravité. */
+  function projectileStep(projectile, remaining) {
+    let duration = Math.min(PROJECTILE_STEP_SECONDS, remaining);
+    const gravityStartsIn = projectile.gravityDelay - projectile.age;
+    if (gravityStartsIn > 0.0000001) duration = Math.min(duration, gravityStartsIn);
+    if (!(duration > 0)) return null;
+    const gravity = projectile.age + 0.0000001 >= projectile.gravityDelay ? projectile.gravity : 0;
+    return {
+      duration,
+      x0: projectile.x,
+      y0: projectile.y,
+      vx: projectile.vx,
+      vy: projectile.vy,
+      gravity,
+      x1: projectile.x + projectile.vx * duration,
+      y1: projectile.y + projectile.vy * duration + 0.5 * gravity * duration * duration,
+    };
+  }
+
+  function setProjectileVelocity(projectile, vx, vy) {
+    projectile.vx = vx;
+    projectile.vy = vy;
+    const length = Math.hypot(vx, vy) || 1;
+    projectile.dirX = vx / length;
+    projectile.dirY = vy / length;
+    projectile.angle = Math.atan2(vy, vx);
+    projectile.facing = vx < 0 ? -1 : 1;
+  }
+
+  /** Valide la nouvelle position et garde l'orientation visuelle tangente à l'arc. */
+  function commitProjectileStep(projectile, motion, time) {
+    const duration = time == null ? motion.duration : clamp(time, 0, motion.duration);
+    projectile.x = motion.x0 + motion.vx * duration;
+    projectile.y = motion.y0 + motion.vy * duration + 0.5 * motion.gravity * duration * duration;
+    projectile.age += duration;
+    setProjectileVelocity(projectile, motion.vx, motion.vy + motion.gravity * duration);
+  }
+
   function updateProjectiles(delta) {
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const projectile = projectiles[i];
-      const x0 = projectile.x;
-      const y0 = projectile.y;
-      // Vol rectiligne le long de la direction visée : le curseur peut être
-      // en l'air, au-dessus, en dessous ou en diagonale.
-      const step = projectile.speed * Math.min(delta, Math.max(0, projectile.life));
-      const x1 = x0 + projectile.dirX * step;
-      const y1 = y0 + projectile.dirY * step;
-      projectile.age += delta;
+      let timeLeft = Math.min(delta, Math.max(0, projectile.life));
+      let hit = null;
+      let target = null;
+
+      // La parabole est balayée par petites lignes : les blocs et les joueurs
+      // restent solides même si un tir rapide traverse plusieurs pixels/image.
+      while (timeLeft > 0.0000001) {
+        const motion = projectileStep(projectile, timeLeft);
+        if (!motion) break;
+        let contact = mining.traceSolid(
+          motion.x0, motion.y0, motion.x1, motion.y1,
+          groundY, projectile.halfWidth, projectile.halfHeight,
+        );
+        let contactTarget = null;
+        if (projectile.owner !== "self" && player.deadTime === 0) {
+          const localHit = projectileTargetHit(
+            projectile, motion.x0, motion.y0, motion.x1, motion.y1, player.x, player.y,
+          );
+          if (localHit && (!contact || localHit.t < contact.t)) {
+            contact = localHit;
+            contactTarget = "self";
+          }
+        }
+        others.forEach((peer) => {
+          if (peer.dead || peer.id === projectile.owner) return;
+          const peerHit = projectileTargetHit(
+            projectile, motion.x0, motion.y0, motion.x1, motion.y1, peer.rx, peer.ry,
+          );
+          if (peerHit && (!contact || peerHit.t < contact.t)) {
+            contact = peerHit;
+            contactTarget = peer;
+          }
+        });
+
+        if (contact) {
+          commitProjectileStep(projectile, motion, motion.duration * contact.t);
+          projectile.x = contact.x;
+          projectile.y = contact.y;
+          hit = contact;
+          target = contactTarget;
+          break;
+        }
+        commitProjectileStep(projectile, motion);
+        timeLeft -= motion.duration;
+      }
       projectile.life -= delta;
 
-      // Balayage continu : jamais de traversée d'un bloc entre deux images.
-      // On choisit le premier contact (bloc ou joueur) ; le bloc gagne les
-      // égalités, donc aucune victime derrière une paroi ne prend de dégâts.
-      let hit = mining.traceSolid(x0, y0, x1, y1, groundY, projectile.halfWidth, projectile.halfHeight);
-      let target = null;
-      if (projectile.owner !== "self" && player.deadTime === 0) {
-        const localHit = projectileTargetHit(projectile, x0, y0, x1, y1, player.x, player.y);
-        if (localHit && (!hit || localHit.t < hit.t)) {
-          hit = localHit;
-          target = "self";
-        }
-      }
-      others.forEach((peer) => {
-        if (peer.dead || peer.id === projectile.owner) return;
-        const peerHit = projectileTargetHit(projectile, x0, y0, x1, y1, peer.rx, peer.ry);
-        if (peerHit && (!hit || peerHit.t < hit.t)) {
-          hit = peerHit;
-          target = peer;
-        }
-      });
-      projectile.x = hit ? hit.x : x1;
-      projectile.y = hit ? hit.y : y1;
-
-      // Traînée : quelques particules par image selon le style.
+      // Traînée : particules discrètes, désactivables dans les paramètres.
       projectile.trailTimer -= delta;
-      if (projectile.trailTimer <= 0) {
+      if (gameSettings.showTrails && projectile.trailTimer <= 0) {
         projectile.trailTimer = projectile.style === "orb" ? 0.03 : 0.022;
         fx.trail(projectile.x, projectile.y, projectile.style, projectile.color, projectile.facing, projectile);
       }
@@ -2311,7 +2614,7 @@
   }
 
   function startAttack() {
-    if (!playing || player.attackTime > 0 || player.deadTime > 0) return;
+    if (!playing || settingsOpen || player.attackTime > 0 || player.deadTime > 0) return;
     if (player.hurtTime > HURT_DURATION * 0.55) return;
     updatePlayerFacing();
     const character = characterFor(identity.character);
@@ -2328,31 +2631,45 @@
     player.shotTimer = character.projectileDelay || 0;
   }
 
-  function spawnProjectile(character, x, y, direction, color, owner) {
-    const dirX = direction && Number.isFinite(direction.x) ? direction.x : 1;
-    const dirY = direction && Number.isFinite(direction.y) ? direction.y : 0;
-    projectiles.push({
+  function createProjectile(character, x, y, direction, color, owner, rawPhysics) {
+    const physics = PROJECTILE_PHYSICS.normalize(character.id, rawPhysics);
+    const rawX = direction && Number.isFinite(direction.x) ? direction.x : 1;
+    const rawY = direction && Number.isFinite(direction.y) ? direction.y : 0;
+    const directionLength = Math.hypot(rawX, rawY) || 1;
+    const dirX = rawX / directionLength;
+    const dirY = rawY / directionLength;
+    const bounds = PROJECTILE_BOUNDS[character.attackStyle];
+    const projectile = {
       style: character.attackStyle,
-      ...PROJECTILE_BOUNDS[character.attackStyle],
+      halfWidth: bounds.halfWidth * physics.scale,
+      halfHeight: bounds.halfHeight * physics.scale,
       x,
       y,
-      // Direction de vol (unitaire) et angle de dessin : le projectile file
-      // vers le curseur, dans toutes les directions.
       dirX,
       dirY,
       angle: Math.atan2(dirY, dirX),
-      facing: dirX >= 0 ? 1 : -1,
-      speed: character.projectileSpeed,
+      facing: dirX < 0 ? -1 : 1,
+      vx: dirX * physics.speed,
+      vy: dirY * physics.speed,
+      speed: physics.speed,
+      gravity: physics.gravity,
+      gravityDelay: physics.gravityDelay,
+      scale: physics.scale,
       age: 0,
-      life: character.projectileLife,
-      initialLife: character.projectileLife,
+      life: physics.life,
+      initialLife: physics.life,
       color,
       owner,
       damage: character.attackDamage,
       knockback: character.knockback,
       hitSound: character.hitSound,
       trailTimer: 0,
-    });
+    };
+    return projectile;
+  }
+
+  function spawnProjectile(character, x, y, direction, color, owner, physics) {
+    projectiles.push(createProjectile(character, x, y, direction, color, owner, physics));
     if (projectiles.length > 64) projectiles.splice(0, projectiles.length - 64);
   }
 
@@ -2527,6 +2844,76 @@
     ctx.restore();
   }
 
+  function drawProjectileTrajectoryPreview() {
+    if (!gameSettings.trajectoryPreview || !playing || settingsOpen || chatOpen || player.deadTime > 0) return;
+    const character = characterFor(identity.character);
+    if (character.attackStyle === "slash" || player.attackTime > 0 || player.shotTimer >= 0) return;
+
+    const physics = projectileSettingsFor(character.id);
+    const origin = projectileOrigin(player.x, player.y, player.facing);
+    const aim = aimWorldPoint();
+    const direction = aimDirection(
+      origin.x, origin.y,
+      aim ? aim.x : origin.x + player.facing,
+      aim ? aim.y : origin.y,
+      player.facing,
+    );
+    const projectile = createProjectile(character, origin.x, origin.y, direction, character.accent, "self", physics);
+    const points = [{ x: projectile.x, y: projectile.y }];
+    let remaining = Math.min(gameSettings.previewDuration, projectile.life);
+
+    // Même intégration et même collision avec les blocs que le vrai projectile.
+    while (remaining > 0.0000001) {
+      const motion = projectileStep(projectile, remaining);
+      if (!motion) break;
+      const wall = mining.traceSolid(
+        motion.x0, motion.y0, motion.x1, motion.y1,
+        groundY, projectile.halfWidth, projectile.halfHeight,
+      );
+      if (wall) {
+        points.push({ x: wall.x, y: wall.y });
+        break;
+      }
+      commitProjectileStep(projectile, motion);
+      points.push({ x: projectile.x, y: projectile.y });
+      remaining -= motion.duration;
+      if (projectile.x < -80 || projectile.x > WORLD_WIDTH + 80 ||
+          projectile.y < -600 || projectile.y > groundY + mining.totalHeight + 320) break;
+    }
+    if (points.length < 2) return;
+
+    const last = points[points.length - 1];
+    ctx.save();
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      const x = point.x - camX;
+      if (index === 0) ctx.moveTo(x, point.y);
+      else ctx.lineTo(x, point.y);
+    });
+    ctx.strokeStyle = character.accent;
+    ctx.lineWidth = 4;
+    ctx.globalAlpha = 0.22;
+    ctx.shadowColor = character.accent;
+    ctx.shadowBlur = 10;
+    ctx.setLineDash([]);
+    ctx.stroke();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.6;
+    ctx.globalAlpha = 0.82;
+    ctx.shadowBlur = 0;
+    ctx.lineCap = "round";
+    ctx.setLineDash([4, 6]);
+    ctx.lineDashOffset = -(lastTime / 90) % 10;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = character.accent;
+    ctx.beginPath();
+    ctx.arc(last.x - camX, last.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   function drawProjectiles() {
     projectiles.forEach((projectile) => {
       const screenX = projectile.x - camX;
@@ -2536,6 +2923,7 @@
       const fade = clamp(projectile.life / Math.min(0.35, projectile.initialLife), 0, 1);
       ctx.save();
       ctx.translate(Math.round(screenX), Math.round(screenY));
+      ctx.scale(projectile.scale, projectile.scale);
       // Le projectile est orienté dans son sens de vol : la flèche pointe
       // vraiment là où elle va, même en diagonale ou à la verticale.
       ctx.rotate(Number.isFinite(projectile.angle) ? projectile.angle : 0);
@@ -2543,15 +2931,17 @@
 
       if (projectile.style === "arrow") {
         // Lignes de vitesse derrière la flèche.
-        ctx.globalAlpha = fade * 0.5;
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(-22, -5);
-        ctx.lineTo(-40, -5);
-        ctx.moveTo(-26, 4);
-        ctx.lineTo(-48, 4);
-        ctx.stroke();
+        if (gameSettings.showTrails) {
+          ctx.globalAlpha = fade * 0.5;
+          ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(-22, -5);
+          ctx.lineTo(-40, -5);
+          ctx.moveTo(-26, 4);
+          ctx.lineTo(-48, 4);
+          ctx.stroke();
+        }
         ctx.globalAlpha = fade;
         ctx.shadowColor = projectile.color;
         ctx.shadowBlur = 8;
@@ -2581,13 +2971,15 @@
         ctx.fill();
       } else if (projectile.style === "shuriken") {
         // Fantômes de rotation derrière l'étoile.
-        for (let ghost = 2; ghost >= 1; ghost--) {
-          ctx.save();
-          ctx.translate(-ghost * 9, 0);
-          ctx.rotate(projectile.age * 15 - ghost * 0.6);
-          ctx.globalAlpha = fade * (0.28 - ghost * 0.09);
-          drawShuriken(projectile.color, 10);
-          ctx.restore();
+        if (gameSettings.showTrails) {
+          for (let ghost = 2; ghost >= 1; ghost--) {
+            ctx.save();
+            ctx.translate(-ghost * 9, 0);
+            ctx.rotate(projectile.age * 15 - ghost * 0.6);
+            ctx.globalAlpha = fade * (0.28 - ghost * 0.09);
+            drawShuriken(projectile.color, 10);
+            ctx.restore();
+          }
         }
         ctx.rotate(projectile.age * 15);
         ctx.shadowColor = projectile.color;
@@ -2603,12 +2995,14 @@
         ctx.stroke();
       } else if (projectile.style === "orb") {
         const pulse = 1 + Math.sin(projectile.age * 18) * 0.1;
-        for (let trail = 4; trail >= 1; trail--) {
-          ctx.globalAlpha = fade * (0.06 + (5 - trail) * 0.05);
-          ctx.beginPath();
-          ctx.arc(-trail * 9, Math.sin(projectile.age * 9 - trail) * 2.5, (3 + (5 - trail)) * pulse, 0, Math.PI * 2);
-          ctx.fillStyle = projectile.color;
-          ctx.fill();
+        if (gameSettings.showTrails) {
+          for (let trail = 4; trail >= 1; trail--) {
+            ctx.globalAlpha = fade * (0.06 + (5 - trail) * 0.05);
+            ctx.beginPath();
+            ctx.arc(-trail * 9, Math.sin(projectile.age * 9 - trail) * 2.5, (3 + (5 - trail)) * pulse, 0, Math.PI * 2);
+            ctx.fillStyle = projectile.color;
+            ctx.fill();
+          }
         }
         ctx.globalAlpha = fade;
         ctx.shadowColor = projectile.color;
@@ -2998,6 +3392,7 @@
     drawTufts();
     scenery.drawProps(ctx, view);
     scenery.drawPlatforms(ctx, view);
+    drawProjectileTrajectoryPreview();
 
     drawOthers();
 
@@ -3059,6 +3454,32 @@
 
   window.addEventListener("keydown", (event) => {
     const keyLabel = event.key.toLowerCase();
+    if (event.key === "Tab" && settingsOpen) {
+      const focusable = Array.from(projectileSettingsOverlay.querySelectorAll("button:not([hidden]), input:not([disabled])"))
+        .filter((element) => {
+          let parent = element;
+          while (parent && parent !== projectileSettingsOverlay) {
+            if (parent.hidden || parent.disabled) return false;
+            parent = parent.parentElement;
+          }
+          return parent === projectileSettingsOverlay;
+        });
+      if (focusable.length) {
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        } else if (!focusable.includes(document.activeElement)) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+      return;
+    }
     if (event.key === "Tab" && !gameMenu.hidden) {
       const focusable = Array.from(gameMenu.querySelectorAll("button:not([hidden]), input:not([disabled])"));
       if (focusable.length) {
@@ -3084,6 +3505,10 @@
         closeChat();
         return;
       }
+      if (settingsOpen) {
+        closeProjectileSettings();
+        return;
+      }
       if (playing) {
         sfx("uiPause");
         openMenu("pause");
@@ -3101,6 +3526,12 @@
       if (event.code === "Space" && !isTypingTarget(event.target)) event.preventDefault();
       return;
     }
+    if ((event.code === "KeyP" || keyLabel === "p") && !event.repeat && !isTypingTarget(event.target)) {
+      event.preventDefault();
+      toggleProjectileSettings();
+      return;
+    }
+    if (settingsOpen) return;
     if ((event.code === "KeyM" || keyLabel === "m") && !event.repeat && !isTypingTarget(event.target)) {
       event.preventDefault();
       toggleMute();
@@ -3237,10 +3668,14 @@
   player.speed = characterFor(identity.character).speed;
   player.jumpStrength = characterFor(identity.character).jumpStrength;
   selectedCharacter = identity.character;
+  selectedSettingsCharacter = identity.character;
+  loadGameSettings();
 
   // Adresse du serveur saisie lors d'une partie précédente (vide = ce PC).
 
   buildCharacterCards();
+  buildSettingsTabs();
+  updateSettingsPanel();
   updateSoundButtons();
   updateHotbar();
   setHotbarVisible(false);
@@ -3264,8 +3699,17 @@
     placed: () => mining.getPlaced(),
     inventory: () => mining.inventory(),
     drops: () => mining.getDrops(),
-    projectiles: () => projectiles.map(({ style, x, y, owner, dirX, dirY, angle, facing }) =>
-      ({ style, x, y, owner, dirX, dirY, angle, facing })),
+    projectiles: () => projectiles.map(({ style, x, y, owner, dirX, dirY, angle, facing, vx, vy, speed, gravity, gravityDelay, scale, age, life }) =>
+      ({ style, x, y, owner, dirX, dirY, angle, facing, vx, vy, speed, gravity, gravityDelay, scale, age, life })),
+    get projectileSettings() {
+      return {
+        projectiles: JSON.parse(JSON.stringify(gameSettings.projectiles)),
+        trajectoryPreview: gameSettings.trajectoryPreview,
+        previewDuration: gameSettings.previewDuration,
+        showTrails: gameSettings.showTrails,
+      };
+    },
+    get settingsOpen() { return settingsOpen; },
     peers: () => Array.from(others.values(), ({ id, lastHitByUsAt }) => ({ id, lastHitByUsAt })),
     cursors: () => Array.from(others.values(), (peer) => ({
       id: peer.id,
