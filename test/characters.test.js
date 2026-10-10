@@ -59,11 +59,32 @@ assert(catalog.get("archer").projectileGravity > catalog.get("ninja").projectile
   "La flèche de Sora retombe plus fort que le shuriken de Kage");
 assert(catalog.get("mage").projectileGravity < catalog.get("ninja").projectileGravity,
   "L'orbe de Yume garde une trajectoire plus flottante");
+// La physique des tirs est une valeur du jeu, pas un réglage du joueur :
+// le module partagé ne doit exposer ni bornes à respecter ni normalisation.
 const physics = sandbox.window.PixWorldProjectilePhysics;
-assert.strictEqual(physics.normalize("archer", { speed: 9999 }).speed, physics.RANGES.speed.max,
-  "La vitesse de projectile est bornée avant d'être partagée");
-assert.strictEqual(physics.normalize("ninja", { gravity: -50 }).gravity, physics.RANGES.gravity.min,
-  "La gravité est bornée à zéro au minimum");
+assert.deepStrictEqual(Object.keys(physics).sort(), ["DEFAULTS", "forCharacter"],
+  "src/projectile-physics.js ne fournit que les valeurs fixées par le jeu");
+assert(Object.isFrozen(physics.DEFAULTS), "La table des tirs est gelée");
+for (const id of ["ninja", "archer", "mage"]) {
+  const fixed = physics.DEFAULTS[id];
+  const character = catalog.get(id);
+  assert(Object.isFrozen(fixed), "Les valeurs du " + id + " sont gelées");
+  assert.strictEqual(character.projectileSpeed, fixed.speed, "Vitesse imposée pour " + id);
+  assert.strictEqual(character.projectileGravity, fixed.gravity, "Gravité imposée pour " + id);
+  assert.strictEqual(character.projectileGravityDelay, fixed.gravityDelay, "Début de chute imposé pour " + id);
+  assert.strictEqual(character.projectileLife, fixed.life, "Durée de vol imposée pour " + id);
+  assert.strictEqual(character.projectileScale, fixed.scale, "Taille imposée pour " + id);
+}
+assert.strictEqual(physics.forCharacter("archer"), physics.DEFAULTS.archer, "forCharacter renvoie la table du héros");
+assert.strictEqual(physics.forCharacter("héros-mystère"), physics.DEFAULTS.ninja, "Un héros inconnu retombe sur le ninja");
+
+// Le catalogue est la seule source de ces valeurs : il n'écoute ni le
+// stockage local ni le réseau.
+const charactersSource = fs.readFileSync(path.join(__dirname, "..", "src", "characters.js"), "utf8");
+assert(!/localStorage|getItem|\bnet\b/.test(charactersSource),
+  "Aucun réglage lu par le catalogue de personnages");
+assert(!/normalize|\bRANGES\b/.test(charactersSource),
+  "Le catalogue ne normalise rien : les valeurs sont prises telles quelles");
 
 // Chaque héros a maintenant sa propre feuille : Sora et Raiden ne partagent
 // plus le corps du ninja, et aucune teinte n'est appliquée aux sprites.

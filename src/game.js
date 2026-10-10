@@ -20,6 +20,12 @@
  *
  * Tous les joueurs rejoignent le serveur WebSocket du site : voir src/net.js.
  *
+ * Le panneau ⚙ (touche P) ne règle que l'affichage du tir : son aperçu en
+ * pointillés, la longueur de cet aperçu et les traînées. La physique des
+ * projectiles vient de src/characters.js et src/projectile-physics.js : elle
+ * est la même pour tous les joueurs, modifiable nulle part et jamais relue
+ * depuis le réseau.
+ *
  * La touche T ouvre la discussion : les lignes sont diffusées à toute l'arène
  * et les commandes /tp (téléporter un joueur sur un autre) et /kill (mettre
  * K.O.) sont résolues par le serveur, qui n'avertit que le client concerné.
@@ -56,7 +62,6 @@
   const featuredPreview = document.querySelector("#menu-featured-preview");
   const featuredPreviewContext = featuredPreview.getContext("2d");
   const CHARACTERS = window.PixWorldCharacters;
-  const PROJECTILE_PHYSICS = window.PixWorldProjectilePhysics;
   const characterPreviews = [];
 
   const playersPanel = document.querySelector("#players");
@@ -76,30 +81,20 @@
   const projectileSettingsOverlay = document.querySelector("#projectile-settings");
   const settingsClose = document.querySelector("#settings-close");
   const settingsDone = document.querySelector("#settings-done");
-  const settingsTabs = document.querySelector("#settings-character-tabs");
-  const settingsCharacterIcon = document.querySelector("#settings-character-icon");
-  const settingsCharacterName = document.querySelector("#settings-character-name");
-  const settingsCharacterDescription = document.querySelector("#settings-character-description");
-  const settingsProjectileControls = document.querySelector("#settings-projectile-controls");
+  const settingsLockedControls = document.querySelector("#settings-projectile-locked");
+  const settingsLockedHero = document.querySelector("#settings-locked-hero");
   const settingsMeleeNote = document.querySelector("#settings-melee-note");
-  const settingsReset = document.querySelector("#settings-reset");
   const settingsTrajectoryPreview = document.querySelector("#settings-trajectory-preview");
   const settingsProjectileTrails = document.querySelector("#settings-projectile-trails");
   const settingsPreviewDuration = document.querySelector("#settings-preview-duration");
   const settingsPreviewDurationValue = document.querySelector("#settings-preview-duration-value");
-  const projectileSettingInputs = {
-    speed: document.querySelector("#settings-projectile-speed"),
-    gravity: document.querySelector("#settings-projectile-gravity"),
-    gravityDelay: document.querySelector("#settings-projectile-delay"),
-    life: document.querySelector("#settings-projectile-life"),
-    scale: document.querySelector("#settings-projectile-scale"),
-  };
-  const projectileSettingOutputs = {
-    speed: document.querySelector("#settings-projectile-speed-value"),
-    gravity: document.querySelector("#settings-projectile-gravity-value"),
-    gravityDelay: document.querySelector("#settings-projectile-delay-value"),
-    life: document.querySelector("#settings-projectile-life-value"),
-    scale: document.querySelector("#settings-projectile-scale-value"),
+  // Valeurs de tir affichées sans pouvoir être modifiées (lecture seule).
+  const projectileStatOutputs = {
+    speed: document.querySelector("#settings-locked-speed"),
+    gravity: document.querySelector("#settings-locked-gravity"),
+    gravityDelay: document.querySelector("#settings-locked-delay"),
+    life: document.querySelector("#settings-locked-life"),
+    scale: document.querySelector("#settings-locked-scale"),
   };
   const hotbarCounts = {
     grass: document.querySelector("#count-grass"),
@@ -118,7 +113,11 @@
 
   const STORAGE_NAME = "pixworld.name";
   const STORAGE_CHARACTER = "pixworld.character";
-  const STORAGE_PROJECTILE_SETTINGS = "pixworld.projectile-settings";
+  // Préférences d'affichage du tir (aperçu, traînées, longueur de l'aperçu).
+  const STORAGE_DISPLAY_SETTINGS = "pixworld.display-settings";
+  // Ancienne clé des réglages de tir par héros : supprimée, plus personne ne
+  // peut modifier la physique d'un projectile.
+  const LEGACY_STORAGE_PROJECTILE_SETTINGS = "pixworld.projectile-settings";
   const FONT_STACK = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 
   // Points de vie : barre au-dessus de chaque joueur, dégâts des attaques.
@@ -131,6 +130,11 @@
   const FLASH_DURATION = 0.09; // silhouette blanche après un coup
   const LOW_HP = 35; // en dessous : vignette rouge et battements de cœur
   const COMBO_FINISHER_BONUS = 5; // la 3e coupe de Raiden frappe plus fort
+  // Longueur de l'aperçu tracé avant le tir : une question d'affichage, comme
+  // son activation et les traînées. Elle ne change jamais le vol réel.
+  const PREVIEW_DURATION_MIN = 0.4;
+  const PREVIEW_DURATION_MAX = 4;
+  const PREVIEW_DURATION_DEFAULT = 2;
   const PROJECTILE_BOUNDS = {
     arrow: { halfWidth: 19, halfHeight: 5 },
     shuriken: { halfWidth: 11, halfHeight: 11 },
@@ -285,12 +289,12 @@
   let sendTimer = 0;
   let menuMode = "start";
   let selectedCharacter = "ninja";
-  let selectedSettingsCharacter = "ninja";
   let settingsOpen = false;
   let lastPanelHp = MAX_HP;
   const projectiles = [];
+  // Préférences d'affichage : la physique des tirs n'en fait pas partie, elle
+  // est fixée par src/projectile-physics.js et ne se règle nulle part.
   const gameSettings = {
-    projectiles: Object.create(null),
     trajectoryPreview: false,
     previewDuration: 2,
     showTrails: true,
@@ -339,42 +343,54 @@
     }
   }
 
+  /**
+   * Préférences d'affichage, sauvegardées sur cet appareil uniquement.
+   *
+   * L'ancienne clé « pixworld.projectile-settings » gardait des réglages de
+   * physique par héros : elle est effacée sans être lue. La vitesse, la
+   * gravité, la taille ou la durée d'un tir ne sont pas à la main des joueurs.
+   */
   function loadGameSettings() {
+    forgetLegacyProjectileSettings();
     let saved = {};
     try {
-      saved = JSON.parse(stored(STORAGE_PROJECTILE_SETTINGS, "{}")) || {};
+      saved = JSON.parse(stored(STORAGE_DISPLAY_SETTINGS, "{}")) || {};
     } catch (error) {
       saved = {};
     }
-    const savedProjectiles = saved.projectiles && typeof saved.projectiles === "object"
-      ? saved.projectiles
-      : {};
-    CHARACTERS.list.forEach((character) => {
-      if (character.attackStyle === "slash") return;
-      gameSettings.projectiles[character.id] = PROJECTILE_PHYSICS.normalize(
-        character.id,
-        savedProjectiles[character.id],
-      );
-    });
     gameSettings.trajectoryPreview = saved.trajectoryPreview === true;
     gameSettings.showTrails = saved.showTrails !== false;
     const previewDuration = Number(saved.previewDuration);
     gameSettings.previewDuration = Number.isFinite(previewDuration)
-      ? clamp(previewDuration, 0.4, 4)
-      : 2;
+      ? clamp(previewDuration, PREVIEW_DURATION_MIN, PREVIEW_DURATION_MAX)
+      : PREVIEW_DURATION_DEFAULT;
+  }
+
+  function forgetLegacyProjectileSettings() {
+    try {
+      window.localStorage.removeItem(LEGACY_STORAGE_PROJECTILE_SETTINGS);
+    } catch (error) {
+      /* stockage indisponible : ce n'est pas grave */
+    }
   }
 
   function saveGameSettings() {
-    remember(STORAGE_PROJECTILE_SETTINGS, JSON.stringify({
-      projectiles: gameSettings.projectiles,
+    remember(STORAGE_DISPLAY_SETTINGS, JSON.stringify({
       trajectoryPreview: gameSettings.trajectoryPreview,
       previewDuration: gameSettings.previewDuration,
       showTrails: gameSettings.showTrails,
     }));
   }
 
-  function projectileSettingsFor(characterId) {
-    return gameSettings.projectiles[characterId] || PROJECTILE_PHYSICS.normalize(characterId);
+  /** Le tir du héros, tel que le jeu l'a fixé (aucune valeur réglable). */
+  function characterProjectile(character) {
+    return {
+      speed: character.projectileSpeed,
+      gravity: character.projectileGravity,
+      gravityDelay: character.projectileGravityDelay,
+      life: character.projectileLife,
+      scale: character.projectileScale,
+    };
   }
 
   function clamp(value, min, max) {
@@ -572,30 +588,7 @@
     });
   }
 
-  function buildSettingsTabs() {
-    CHARACTERS.list.forEach((character) => {
-      const tab = document.createElement("button");
-      tab.type = "button";
-      tab.className = "settings-character-tab";
-      tab.dataset.character = character.id;
-      tab.setAttribute("role", "tab");
-      tab.setAttribute("aria-selected", "false");
-      tab.setAttribute("aria-label", "Réglages de " + character.name + " · " + character.attackName);
-      tab.style.setProperty("--hero-accent", character.accent);
-      const dot = document.createElement("span");
-      dot.className = "settings-tab-dot";
-      dot.setAttribute("aria-hidden", "true");
-      const name = document.createElement("span");
-      name.textContent = character.name;
-      tab.append(dot, name);
-      tab.addEventListener("click", () => selectSettingsCharacter(character.id, true));
-      tab.addEventListener("pointerenter", () => {
-        if (tab.getAttribute("aria-selected") !== "true") sfx("uiHover", { volume: 0.45 });
-      });
-      settingsTabs.append(tab);
-    });
-  }
-
+  /** Texte d'une valeur de tir : unités affichées en lecture seule. */
   function formatProjectileSetting(key, value) {
     if (key === "speed") return Math.round(value) + " px/s";
     if (key === "gravity") return Math.round(value) + " px/s²";
@@ -604,25 +597,23 @@
     return Number(value).toFixed(digits).replace(".", ",") + " s";
   }
 
+  /**
+   * Panneau d'affichage : le tir du héros y est montré sans curseur ni champ,
+   * parce qu'il n'est pas réglable. Seuls l'aperçu, sa longueur et les
+   * traînées dépendent du joueur.
+   */
   function updateSettingsPanel() {
-    const character = characterFor(selectedSettingsCharacter);
+    const character = characterFor(identity.character);
     const hasProjectile = character.attackStyle !== "slash";
-    settingsCharacterIcon.style.setProperty("--hero-accent", character.accent);
-    settingsCharacterIcon.textContent = character.attackStyle === "slash" ? "⚔" : "✦";
-    settingsCharacterName.textContent = character.name + " · " + character.attackName;
-    settingsCharacterDescription.textContent = character.attackDescription;
-    settingsTabs.querySelectorAll(".settings-character-tab").forEach((tab) => {
-      tab.setAttribute("aria-selected", String(tab.dataset.character === selectedSettingsCharacter));
-    });
-    settingsProjectileControls.hidden = !hasProjectile;
+    settingsLockedControls.hidden = !hasProjectile;
     settingsMeleeNote.hidden = hasProjectile;
-    settingsReset.disabled = !hasProjectile;
-
+    settingsLockedControls.style.setProperty("--hero-accent", character.accent);
     if (hasProjectile) {
-      const physics = projectileSettingsFor(character.id);
-      Object.keys(projectileSettingInputs).forEach((key) => {
-        projectileSettingInputs[key].value = String(physics[key]);
-        projectileSettingOutputs[key].textContent = formatProjectileSetting(key, physics[key]);
+      settingsLockedHero.textContent = character.name + " · " + character.attackName;
+      const physics = characterProjectile(character);
+      Object.keys(projectileStatOutputs).forEach((key) => {
+        const output = projectileStatOutputs[key];
+        if (output) output.textContent = formatProjectileSetting(key, physics[key]);
       });
     }
     settingsTrajectoryPreview.checked = gameSettings.trajectoryPreview;
@@ -631,42 +622,17 @@
     settingsPreviewDurationValue.textContent = formatProjectileSetting("life", gameSettings.previewDuration);
   }
 
-  function selectSettingsCharacter(id, withSound) {
-    selectedSettingsCharacter = cleanCharacter(id);
-    updateSettingsPanel();
-    if (withSound) sfx("uiSelect", { volume: 0.5 });
-  }
-
-  function updateProjectileSetting(key) {
-    const character = characterFor(selectedSettingsCharacter);
-    if (character.attackStyle === "slash" || !projectileSettingInputs[key]) return;
-    const current = projectileSettingsFor(character.id);
-    gameSettings.projectiles[character.id] = PROJECTILE_PHYSICS.normalize(character.id, {
-      ...current,
-      [key]: Number(projectileSettingInputs[key].value),
-    });
-    saveGameSettings();
-    updateSettingsPanel();
-  }
-
   function updateDisplaySetting(key, value) {
     if (key === "trajectoryPreview") gameSettings.trajectoryPreview = Boolean(value);
     else if (key === "showTrails") gameSettings.showTrails = Boolean(value);
     else if (key === "previewDuration") {
       const parsed = Number(value);
-      gameSettings.previewDuration = Number.isFinite(parsed) ? clamp(parsed, 0.4, 4) : 2;
+      gameSettings.previewDuration = Number.isFinite(parsed)
+        ? clamp(parsed, PREVIEW_DURATION_MIN, PREVIEW_DURATION_MAX)
+        : PREVIEW_DURATION_DEFAULT;
     }
     saveGameSettings();
     updateSettingsPanel();
-  }
-
-  function resetSelectedProjectileSettings() {
-    const character = characterFor(selectedSettingsCharacter);
-    if (character.attackStyle === "slash") return;
-    gameSettings.projectiles[character.id] = PROJECTILE_PHYSICS.normalize(character.id);
-    saveGameSettings();
-    updateSettingsPanel();
-    sfx("uiBack", { volume: 0.6 });
   }
 
   function updateCharacterCards() {
@@ -962,7 +928,6 @@
   function openProjectileSettings() {
     if (!playing || settingsOpen || chatOpen) return;
     settingsOpen = true;
-    selectedSettingsCharacter = cleanCharacter(identity.character);
     updateSettingsPanel();
     projectileSettingsOverlay.hidden = false;
     settingsToggle.setAttribute("aria-expanded", "true");
@@ -1159,13 +1124,8 @@
   settingsToggle.addEventListener("click", toggleProjectileSettings);
   settingsClose.addEventListener("click", () => closeProjectileSettings());
   settingsDone.addEventListener("click", () => closeProjectileSettings());
-  settingsReset.addEventListener("click", resetSelectedProjectileSettings);
   projectileSettingsOverlay.addEventListener("click", (event) => {
     if (event.target === projectileSettingsOverlay) closeProjectileSettings();
-  });
-  Object.keys(projectileSettingInputs).forEach((key) => {
-    projectileSettingInputs[key].addEventListener("input", () => updateProjectileSetting(key));
-    projectileSettingInputs[key].addEventListener("change", () => sfx("uiSelect", { volume: 0.35 }));
   });
   settingsTrajectoryPreview.addEventListener("change", () => {
     updateDisplaySetting("trajectoryPreview", settingsTrajectoryPreview.checked);
@@ -1195,7 +1155,7 @@
   });
   chatInput.addEventListener("input", () => sfx("uiType", { volume: 0.5 }));
   if (menuServerCopy) menuServerCopy.addEventListener("click", copyServerAddress);
-  [menuClose, menuHome, playersRename, settingsToggle, settingsClose, settingsDone, settingsReset, menuForm.querySelector(".menu-primary")].forEach((button) => {
+  [menuClose, menuHome, playersRename, settingsToggle, settingsClose, settingsDone, menuForm.querySelector(".menu-primary")].forEach((button) => {
     if (button) button.addEventListener("pointerenter", () => sfx("uiHover", { volume: 0.5 }));
   });
   if (soundToggle) soundToggle.addEventListener("click", toggleMute);
@@ -1368,9 +1328,6 @@
     if (existing) {
       existing.name = cleanName(data.name);
       existing.character = cleanCharacter(data.character || data.c || existing.character);
-      existing.projectile = existing.character === "samurai"
-        ? null
-        : PROJECTILE_PHYSICS.normalize(existing.character, data.projectile);
       return false;
     }
     const character = cleanCharacter(data.character || data.c);
@@ -1378,7 +1335,6 @@
       id: data.id,
       name: cleanName(data.name),
       character,
-      projectile: character === "samurai" ? null : PROJECTILE_PHYSICS.normalize(character, data.projectile),
       hp: MAX_HP,
       hpKnown: false,
       dead: false,
@@ -1431,9 +1387,6 @@
       peer.character = nextCharacter;
       panelDirty = true;
     }
-    peer.projectile = nextCharacter === "samurai"
-      ? null
-      : PROJECTILE_PHYSICS.normalize(nextCharacter, state.projectile);
     if (state.name && cleanName(state.name) !== peer.name) {
       peer.name = cleanName(state.name);
       panelDirty = true;
@@ -2183,7 +2136,6 @@
         d: player.deadTime > 0,
         cx: cursor ? Math.round(cursor.x) : null,
         cy: cursor ? Math.round(cursor.y) : null,
-        projectile: gameSettings.projectiles[identity.character] || null,
       });
     }
   }
@@ -2218,7 +2170,7 @@
           aim ? aim.y : origin.y,
           player.facing,
         );
-        spawnProjectile(character, origin.x, origin.y, direction, character.accent, "self", projectileSettingsFor(character.id));
+        spawnProjectile(character, origin.x, origin.y, direction, character.accent, "self");
         fx.muzzle(origin.x, origin.y, character.attackStyle, character.accent, player.facing);
         if (character.attackSound) sfx(character.attackSound);
         if (character.attackStyle === "arrow") sfx("arrowSwish", { volume: 0.6 });
@@ -2394,7 +2346,7 @@
               aim ? aim.y : origin.y,
               peer.f,
             );
-            spawnProjectile(character, origin.x, origin.y, direction, character.accent, peer.id, peer.projectile);
+            spawnProjectile(character, origin.x, origin.y, direction, character.accent, peer.id);
             fx.muzzle(origin.x, origin.y, character.attackStyle, character.accent, peer.f);
             if (character.attackSound) sfxAt(character.attackSound, center.x);
             if (character.attackStyle === "arrow") sfxAt("arrowSwish", center.x, { volume: 0.5 });
@@ -2631,8 +2583,13 @@
     player.shotTimer = character.projectileDelay || 0;
   }
 
-  function createProjectile(character, x, y, direction, color, owner, rawPhysics) {
-    const physics = PROJECTILE_PHYSICS.normalize(character.id, rawPhysics);
+  /**
+   * Le tir applique la physique fixée par le jeu pour ce héros : rien n'est
+   * transmis par le joueur ni par le réseau, un client ne peut donc pas
+   * accélérer sa flèche ni élargir sa zone de collision.
+   */
+  function createProjectile(character, x, y, direction, color, owner) {
+    const physics = characterProjectile(character);
     const rawX = direction && Number.isFinite(direction.x) ? direction.x : 1;
     const rawY = direction && Number.isFinite(direction.y) ? direction.y : 0;
     const directionLength = Math.hypot(rawX, rawY) || 1;
@@ -2668,8 +2625,8 @@
     return projectile;
   }
 
-  function spawnProjectile(character, x, y, direction, color, owner, physics) {
-    projectiles.push(createProjectile(character, x, y, direction, color, owner, physics));
+  function spawnProjectile(character, x, y, direction, color, owner) {
+    projectiles.push(createProjectile(character, x, y, direction, color, owner));
     if (projectiles.length > 64) projectiles.splice(0, projectiles.length - 64);
   }
 
@@ -2849,7 +2806,6 @@
     const character = characterFor(identity.character);
     if (character.attackStyle === "slash" || player.attackTime > 0 || player.shotTimer >= 0) return;
 
-    const physics = projectileSettingsFor(character.id);
     const origin = projectileOrigin(player.x, player.y, player.facing);
     const aim = aimWorldPoint();
     const direction = aimDirection(
@@ -2858,7 +2814,7 @@
       aim ? aim.y : origin.y,
       player.facing,
     );
-    const projectile = createProjectile(character, origin.x, origin.y, direction, character.accent, "self", physics);
+    const projectile = createProjectile(character, origin.x, origin.y, direction, character.accent, "self");
     const points = [{ x: projectile.x, y: projectile.y }];
     let remaining = Math.min(gameSettings.previewDuration, projectile.life);
 
@@ -3668,13 +3624,11 @@
   player.speed = characterFor(identity.character).speed;
   player.jumpStrength = characterFor(identity.character).jumpStrength;
   selectedCharacter = identity.character;
-  selectedSettingsCharacter = identity.character;
   loadGameSettings();
 
   // Adresse du serveur saisie lors d'une partie précédente (vide = ce PC).
 
   buildCharacterCards();
-  buildSettingsTabs();
   updateSettingsPanel();
   updateSoundButtons();
   updateHotbar();
@@ -3701,13 +3655,16 @@
     drops: () => mining.getDrops(),
     projectiles: () => projectiles.map(({ style, x, y, owner, dirX, dirY, angle, facing, vx, vy, speed, gravity, gravityDelay, scale, age, life }) =>
       ({ style, x, y, owner, dirX, dirY, angle, facing, vx, vy, speed, gravity, gravityDelay, scale, age, life })),
-    get projectileSettings() {
+    get displaySettings() {
       return {
-        projectiles: JSON.parse(JSON.stringify(gameSettings.projectiles)),
         trajectoryPreview: gameSettings.trajectoryPreview,
         previewDuration: gameSettings.previewDuration,
         showTrails: gameSettings.showTrails,
       };
+    },
+    /** Le tir du héros courant : valeurs du jeu, aucune case modifiable. */
+    get lockedProjectile() {
+      return characterProjectile(characterFor(identity.character));
     },
     get settingsOpen() { return settingsOpen; },
     peers: () => Array.from(others.values(), ({ id, lastHitByUsAt }) => ({ id, lastHitByUsAt })),

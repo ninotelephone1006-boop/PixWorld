@@ -8,6 +8,10 @@
  * (minage et inventaires lâchés à la mort) sont partagés en mémoire jusqu'au
  * redémarrage du serveur ; les joueurs disparaissent à la déconnexion.
  *
+ * La physique des tirs n'est pas négociée : chaque navigateur applique les
+ * valeurs figées du jeu, le serveur relaie les positions, les attaques et la
+ * santé. Un client qui prétendrait changer la vitesse d'un tir n'est pas écouté.
+ *
  * La discussion passe par le même canal : le serveur nettoie les lignes, les
  * diffuse et exécute les commandes /tp (téléporter un joueur sur un autre) et
  * /kill (mettre un joueur K.O.). Il n'avertit que le client concerné, qui joue
@@ -24,7 +28,6 @@ const fs = require("fs");
 const vm = require("vm");
 const path = require("path");
 const crypto = require("crypto");
-const PROJECTILE_PHYSICS = require("../src/projectile-physics.js");
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -408,7 +411,7 @@ function registerPlayer(socket) {
     windowStart: Date.now(),
     lastDeathDropSerial: -1,
     chatTimes: [],
-    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0, hp: 100, d: false, cx: null, cy: null, projectile: PROJECTILE_PHYSICS.normalize("ninja") },
+    state: { x: 112, gap: 0, f: 1, vx: 0, vy: 0, g: true, a: 0, c: "ninja", n: 0, hp: 100, d: false, cx: null, cy: null },
   };
   players.set(id, player);
 
@@ -487,7 +490,9 @@ function handleMessage(player, message) {
       // Curseur en repère monde (null : la souris a quitté la fenêtre).
       cx: message.cx == null ? null : Math.round(clampNumber(message.cx, -4000, WORLD_WIDTH + 4000, 0)),
       cy: message.cy == null ? null : Math.round(clampNumber(message.cy, -12000, 12000, 0)),
-      projectile: character === "samurai" ? null : PROJECTILE_PHYSICS.normalize(character, message.projectile),
+      // La physique des tirs n'est pas relue ici : elle est fixée par le jeu
+      // (src/projectile-physics.js). Un champ « projectile » envoyé par un
+      // client est donc tout simplement ignoré.
     };
     return;
   }
