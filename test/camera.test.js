@@ -1,8 +1,8 @@
 "use strict";
 
 /**
- * Caméra 2,5D : projection identité au sud, 4 azimuts, interpolation,
- * occultation des blocs au-dessus du joueur et restauration.
+ * Caméra 2,5D : seule la vue de base (face sud, repère identité) est conservée,
+ * les autres directions sont retirées. Occultation sous terre préservée.
  */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -16,17 +16,14 @@ vm.runInContext(source, sandbox);
 
 const Camera = sandbox.window.PixWorldCamera;
 assert(Camera && typeof Camera.create === "function", "Le module de caméra est chargé");
-assert.equal(Camera.FACINGS.length, 4, "Quatre directions cardinales");
+assert.equal(Camera.FACINGS.length, 1, "Seule la vue de base est conservée");
 assert.equal(Camera.FACINGS[0].id, "south");
-assert.equal(Camera.FACINGS[1].id, "east");
-assert.equal(Camera.FACINGS[2].id, "north");
-assert.equal(Camera.FACINGS[3].id, "west");
 
 const view = { camX: 100, camY: 40, focusX: 300, focusY: 200, width: 800, height: 600, baseY: 120, blockSize: 48 };
 
 const look = Camera.create();
 assert.equal(look.facingId, "south");
-assert.equal(look.isIdentity(), true, "La vue sud de départ est l'identité");
+assert.equal(look.isIdentity(), true, "La vue de base est l'identité");
 
 const origin = look.project(180, 90, 0, view);
 assert.equal(origin.x, 80, "x écran = monde - camX");
@@ -40,25 +37,18 @@ const lifted = look.project(180, 90, -48, view);
 assert.notEqual(lifted.x, origin.x, "La profondeur décale le 3/4 en x");
 assert.notEqual(lifted.y, origin.y, "La profondeur décale le 3/4 en y");
 
-assert.equal(look.setFacingByArrow("ArrowRight"), true);
-assert.equal(look.facingId, "east");
-look.update(1);
-assert.ok(Math.abs(Camera.normalizeAngle(look.yaw - Math.PI / 2)) < 0.05, "La caméra a tourné vers l'est");
-assert.equal(look.isIdentity(), false);
-
-const east = look.project(180, 90, 0, view);
-assert.ok(Math.abs(east.x - origin.x) > 1 || Math.abs(east.y - origin.y) > 1, "La vue est n'est plus l'identité");
+// Les autres vues sont retirées : les flèches ne changent plus la direction.
+assert.equal(look.setFacingByArrow("ArrowRight"), false);
+assert.equal(look.facingId, "south");
+assert.equal(look.yaw, 0);
+assert.equal(look.isIdentity(), true, "La caméra reste toujours sur la vue de base");
 
 look.setFacingByArrow("ArrowUp");
-look.update(1);
-assert.equal(look.facingId, "north");
-look.setFacingByArrow("ArrowLeft");
-look.update(1);
-assert.equal(look.facingId, "west");
-look.setFacingByArrow("ArrowDown");
-look.update(1);
 assert.equal(look.facingId, "south");
-assert.equal(look.isIdentity(), true, "Retour au sud : projection identité");
+look.setFacingByArrow("ArrowLeft");
+assert.equal(look.facingId, "south");
+look.setFacingByArrow("ArrowDown");
+assert.equal(look.facingId, "south");
 
 look.reset();
 assert.equal(look.yaw, 0);
@@ -79,4 +69,4 @@ const target = Camera.occlusionTarget(3, 1, 0, 3, 5, true);
 assert.ok(target < 0.4, "La cible d'occultation est basse juste au-dessus");
 assert.equal(Camera.occlusionTarget(3, 1, 0, 3, 0, false), 1, "En surface, rien ne s'estompe");
 
-console.log("camera.test.js : projection, 4 directions, occultation : ok");
+console.log("camera.test.js : vue de base conservée, autres directions retirées, occultation : ok");
