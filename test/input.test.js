@@ -34,6 +34,30 @@ function move(game, code, key, frames) {
   game.fire("keyup", { code, key });
 }
 
+/** Curseur placé n'importe où sur l'écran (pas seulement à 300 px du haut). */
+function pointAt(game, x, y) {
+  game.fire("pointermove", { clientX: x, clientY: y, pointerType: "mouse" });
+}
+
+/** Tous les projectiles que nous avons lancés, image par image. */
+function collectShots(game, frames) {
+  const shots = [];
+  for (let frame = 0; frame < frames; frame++) {
+    game.browser.runFrames(1);
+    game.dbg.projectiles().filter((shot) => shot.owner === "self").forEach((shot) => shots.push(shot));
+  }
+  return shots;
+}
+
+/** Origine d'un projectile : devant le torse, là où sort le shuriken. */
+function shotOrigin(game) {
+  const hero = game.dbg.player;
+  return {
+    x: hero.x + hero.width / 2 - game.dbg.camX,
+    y: hero.y + hero.height * 0.46 - game.dbg.camY,
+  };
+}
+
 try {
   const game = createGame();
   point(game, 20);
@@ -116,6 +140,48 @@ try {
   const projectile = shooting.dbg.projectiles().find((p) => p.owner === "self");
   assert.ok(projectile && projectile.x < shooting.dbg.player.x + 21,
     "Une attaque différée part vers le curseur, même en marchant dans l'autre sens");
+
+  // ─────────────────────────── Les projectiles visent le curseur ───────────────────────────
+  console.log("Projectiles lancés dans la direction du curseur");
+  const aiming = createGame();
+  const origin = shotOrigin(aiming);
+  pointAt(aiming, origin.x - 110, origin.y - 230); // en l'air, en haut à gauche
+  aiming.fire("keydown", { code: "KeyX", key: "x", repeat: false });
+  aiming.fire("keyup", { code: "KeyX", key: "x" });
+  const upward = collectShots(aiming, 26);
+  assert.ok(upward.length >= 3, "le tir reste en vol le temps d'être suivi (" + upward.length + " images)");
+  assert.ok(upward.every((shot) => shot.dirX < -0.3 && shot.dirY < -0.8),
+    "le projectile part en diagonale vers le haut, pas à l'horizontale (" +
+      upward[0].dirX.toFixed(2) + " ; " + upward[0].dirY.toFixed(2) + ")");
+  assert.ok(upward.at(-1).x < upward[0].x - 40 && upward.at(-1).y < upward[0].y - 40,
+    "il recule et monte bien vers le curseur");
+  assert.ok(Math.abs(upward[0].angle - Math.atan2(upward[0].dirY, upward[0].dirX)) < 1e-6,
+    "l'angle de dessin suit la direction du vol");
+  assert.equal(Math.hypot(upward[0].dirX, upward[0].dirY).toFixed(6), "1.000000",
+    "la direction est unitaire : la vitesse du projectile ne change pas");
+
+  // Un curseur plus bas que le tireur envoie le projectile vers le sol.
+  const downward = createGame();
+  const low = shotOrigin(downward);
+  pointAt(downward, low.x + 130, low.y + 110);
+  downward.fire("keydown", { code: "KeyX", key: "x", repeat: false });
+  downward.fire("keyup", { code: "KeyX", key: "x" });
+  const falling = collectShots(downward, 20);
+  assert.ok(falling.length > 0, "un tir vers le bas part bien");
+  assert.ok(falling.every((shot) => shot.dirX > 0.3 && shot.dirY > 0.5),
+    "le projectile descend vers le curseur (" + falling[0].dirY.toFixed(2) + ")");
+
+  // Sans curseur connu (souris hors de la fenêtre), le tir garde le sens du corps.
+  const blind = createGame();
+  const straight = shotOrigin(blind);
+  pointAt(blind, straight.x - 100, straight.y);
+  blind.fire("blur");
+  blind.fire("keydown", { code: "KeyX", key: "x", repeat: false });
+  blind.fire("keyup", { code: "KeyX", key: "x" });
+  const ahead = collectShots(blind, 14);
+  assert.ok(ahead.length > 0, "le tir sans curseur part quand même");
+  assert.ok(ahead.every((shot) => shot.dirX === -1 && shot.dirY === 0),
+    "sans visée à la souris, il file droit devant le personnage");
 
   console.log("input.test.js : regard vers le curseur, marche inverse, caméra, pause, HUD, toucher et attaques : ok");
 } finally {
