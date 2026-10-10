@@ -437,11 +437,18 @@ window.PixWorldEffects = (() => {
     }
 
     // ───────────────────────── Dessin ─────────────────────────
-    function drawParticle(ctx, p, camX) {
+    function screenOf(x, y, camX, toScreen) {
+      if (typeof toScreen === "function") return toScreen(x, y);
+      return { x: x - camX, y: y };
+    }
+
+    function drawParticle(ctx, p, camX, toScreen) {
       const k = p.life / p.maxLife;
       const alpha = p.fade === "linear" ? k : k < 0.35 ? k / 0.35 : 1;
       const size = p.shrink ? p.size * (0.35 + 0.65 * k) : p.size;
-      const sx = p.x - camX;
+      const pos = screenOf(p.x, p.y, camX, toScreen);
+      const sx = pos.x;
+      const sy = pos.y;
       ctx.globalAlpha = clamp(alpha, 0, 1);
       ctx.fillStyle = p.color;
       ctx.strokeStyle = p.color;
@@ -453,19 +460,19 @@ window.PixWorldEffects = (() => {
       }
       if (p.shape === "circle") {
         ctx.beginPath();
-        ctx.arc(sx, p.y, size, 0, Math.PI * 2);
+        ctx.arc(sx, sy, size, 0, Math.PI * 2);
         ctx.fill();
       } else if (p.shape === "spark") {
         const angle = p.length ? Math.atan2(p.vy, p.vx) : p.rotation;
         ctx.lineCap = "round";
         ctx.lineWidth = size;
         ctx.beginPath();
-        ctx.moveTo(sx, p.y);
-        ctx.lineTo(sx - Math.cos(angle) * p.length * (0.4 + 0.6 * k), p.y - Math.sin(angle) * p.length * (0.4 + 0.6 * k));
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(sx - Math.cos(angle) * p.length * (0.4 + 0.6 * k), sy - Math.sin(angle) * p.length * (0.4 + 0.6 * k));
         ctx.stroke();
       } else if (p.shape === "star") {
         ctx.save();
-        ctx.translate(sx, p.y);
+        ctx.translate(sx, sy);
         ctx.rotate(p.rotation);
         ctx.beginPath();
         for (let i = 0; i < 8; i++) {
@@ -480,7 +487,7 @@ window.PixWorldEffects = (() => {
       } else if (p.shape === "blade") {
         // Brin d'herbe : petite feuille effilée, qui tourne sur elle-même.
         ctx.save();
-        ctx.translate(sx, p.y);
+        ctx.translate(sx, sy);
         ctx.rotate(p.rotation);
         ctx.beginPath();
         ctx.moveTo(-size * 1.8, 0);
@@ -490,21 +497,21 @@ window.PixWorldEffects = (() => {
         ctx.fill();
         ctx.restore();
       } else if (p.shape === "plus") {
-        ctx.fillRect(sx - size / 2, p.y - size * 1.5, size, size * 3);
-        ctx.fillRect(sx - size * 1.5, p.y - size / 2, size * 3, size);
+        ctx.fillRect(sx - size / 2, sy - size * 1.5, size, size * 3);
+        ctx.fillRect(sx - size * 1.5, sy - size / 2, size * 3, size);
       } else {
         ctx.save();
-        ctx.translate(sx, p.y);
+        ctx.translate(sx, sy);
         ctx.rotate(p.rotation);
         ctx.fillRect(-size / 2, -size / 2, size, size);
         ctx.restore();
       }
     }
 
-    function draw(ctx, camX) {
+    function draw(ctx, camX, toScreen) {
       if (!particles.length && !rings.length && !texts.length) return;
       ctx.save();
-      particles.forEach((p) => drawParticle(ctx, p, camX));
+      particles.forEach((p) => drawParticle(ctx, p, camX, toScreen));
       ctx.shadowBlur = 0;
       ctx.lineCap = "butt";
 
@@ -512,11 +519,12 @@ window.PixWorldEffects = (() => {
         const k = 1 - r.life / r.maxLife;
         const eased = 1 - (1 - k) * (1 - k);
         const radius = r.from + (r.to - r.from) * eased;
+        const pos = screenOf(r.x, r.y, camX, toScreen);
         ctx.globalAlpha = clamp(1 - k, 0, 1) * 0.9;
         ctx.strokeStyle = r.color;
         ctx.lineWidth = Math.max(0.5, r.width * (1 - k * 0.7));
         ctx.beginPath();
-        ctx.ellipse(r.x - camX, r.y, Math.max(0.1, radius), Math.max(0.1, radius * r.squash), 0, 0, Math.PI * 2);
+        ctx.ellipse(pos.x, pos.y, Math.max(0.1, radius), Math.max(0.1, radius * r.squash), 0, 0, Math.PI * 2);
         ctx.stroke();
       });
 
@@ -526,14 +534,15 @@ window.PixWorldEffects = (() => {
         const age = t.maxLife - t.life;
         const pop = age < 0.12 ? 1.5 - (age / 0.12) * 0.5 : 1;
         const k = t.life / t.maxLife;
+        const pos = screenOf(t.x, t.y, camX, toScreen);
         ctx.globalAlpha = clamp(k < 0.3 ? k / 0.3 : 1, 0, 1);
         ctx.font = t.weight + " " + Math.round(t.size * pop) + "px " + FONT_STACK;
         ctx.lineWidth = 4;
         ctx.lineJoin = "round";
         ctx.strokeStyle = t.stroke;
-        ctx.strokeText(t.text, Math.round(t.x - camX), Math.round(t.y));
+        ctx.strokeText(t.text, Math.round(pos.x), Math.round(pos.y));
         ctx.fillStyle = t.color;
-        ctx.fillText(t.text, Math.round(t.x - camX), Math.round(t.y));
+        ctx.fillText(t.text, Math.round(pos.x), Math.round(pos.y));
       });
       ctx.restore();
     }

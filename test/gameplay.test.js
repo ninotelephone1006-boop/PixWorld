@@ -65,6 +65,9 @@ assert.ok(
   "La chute s'arrête sur la roche mère (pieds à " + (dbg.player.y + 60) + ")",
 );
 assert.ok(dbg.camY > 500, "La caméra est descendue avec le joueur (" + dbg.camY + ")");
+assert.ok(typeof dbg.blockAlpha === "function", "L'occultation est exposée aux tests");
+assert.ok(dbg.blockAlpha(4, 4) < 0.9, "Les blocs au-dessus du joueur s'estompent sous terre (" + dbg.blockAlpha(4, 4) + ")");
+assert.equal(dbg.camera.facing, "south", "La vue de départ reste le sud, sans toucher aux flèches");
 
 // 3. La roche mère ne casse pas, même en insistant.
 const stoneBefore = dbg.inventory().stone;

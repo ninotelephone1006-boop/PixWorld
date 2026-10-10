@@ -822,21 +822,22 @@
     <link rel="stylesheet" href="assets/menu.css" />
   </head>
   <body>
-    <main class="game" aria-label="Jeu de plateforme PixWorld">
-      <canvas id="world" aria-label="Un monde de plateforme pixel art, avec des héros animés et un décor en parallaxe."></canvas>
+    <main class="game" aria-label="Jeu PixWorld en vue 2,5D pixel art">
+      <canvas id="world" aria-label="Un monde pixel art en vue 3/4, avec une caméra à 4 directions, des héros animés et un terrain minable."></canvas>
 
       <section class="hud" aria-label="Commandes du jeu">
         <div class="brand">
           <span class="brand-mark" aria-hidden="true"></span>
           <div>
             <h1 class="brand-name">PIXWORLD</h1>
-            <p class="brand-caption">Prototype 2D</p>
+            <p class="brand-caption">Vue 2,5D pixel art</p>
           </div>
         </div>
         <div class="controls">
           <span class="control"><kbd>A</kbd> gauche</span>
           <span class="control"><kbd>D</kbd> droite</span>
           <span class="control"><kbd class="space">ESPACE</kbd> sauter</span>
+          <span class="control"><kbd>↑↓←→</kbd> caméra</span>
           <span class="control"><kbd>X</kbd> attaquer</span>
           <span class="control"><kbd>SOURIS</kbd> viser</span>
           <span class="control"><kbd>T</kbd> chat</span>
@@ -1078,6 +1079,7 @@
     <script src="src/grass.js"></script>
     <script src="src/world.js"></script>
     <script src="src/scenery.js"></script>
+    <script src="src/camera.js"></script>
     <script src="src/mining.js"></script>
     <script src="src/game.js"></script>
   </body>

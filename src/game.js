@@ -1,9 +1,12 @@
 /**
- * PixWorld — jeu de plateforme 2D multijoueur.
+ * PixWorld — jeu de plateforme 2D multijoueur, vue 2,5D pixel art.
  *
  * Chaque visiteur choisit son héros et son pseudo dans un menu titre dédié.
  * Les quatre combattants ont leur propre feuille de sprite et leur attaque ;
  * Échap rouvre le menu en pause pendant la partie.
+ *
+ * Caméra : les flèches regardent au sud, à l'est, au nord ou à l'ouest, avec
+ * une rotation fluide. Les blocs au-dessus du joueur s'estompent sous terre.
  *
  * Combat : chaque joueur porte une barre de vie. Les attaques des autres
  * (projectiles et coups de mêlée) nous enlèvent des points, nous repoussent
@@ -191,6 +194,8 @@
   // colonnes avec cette même constante, donc le client doit suivre.
   const BLOCK_SIZE = window.PixWorldMining.constants.BLOCK_SIZE;
   const mining = window.PixWorldMining.create({ worldWidth: WORLD_WIDTH, blockSize: BLOCK_SIZE });
+  // Caméra 2,5D : 4 azimuts (flèches), cubes 3/4, occultation sous terre.
+  const look = window.PixWorldCamera.create();
   // Textures de blocs sans couture (Kenney, CC0) : pour casser la répétition
   // sans créer de raccord visible, chaque bloc est dessiné avec l'une des
   // quatre orientations miroir de sa texture (les bords se recollent partout).
@@ -468,9 +473,47 @@
   }
 
   /** Curseur local en repère monde (null si la souris a quitté la fenêtre). */
+  /** Paramètres de projection partagés par le terrain, la visée et le dessin. */
+  function cameraView() {
+    return {
+      width,
+      height,
+      camX,
+      camY,
+      baseY: groundY,
+      focusX: player.x + player.width / 2,
+      focusY: player.y + player.height / 2,
+      look,
+      blockSize: BLOCK_SIZE,
+      getBlock: (column, row) => mining.getBlock(column, row, groundY),
+    };
+  }
+
+  /**
+   * Pixel écran → point du plan de jeu (z = 0). Vue sud : identique à
+   * (px + camX, py + camY), pour ne pas bouger minage ni visée.
+   */
+  function worldFromPointer(px, py, withShake) {
+    const sx = px - (withShake ? fx.shakeX : 0);
+    const sy = py - (withShake ? fx.shakeY : 0);
+    if (look.isIdentity()) return { x: sx + camX, y: sy + camY };
+    return look.unproject(sx, sy, cameraView());
+  }
+
+  /**
+   * Position écran d'un point du plan de jeu. En vue sud, `translated`
+   * restitue le repère historique (Y monde, X déjà décalé) utilisé sous
+   * `ctx.translate(0, -camY)`.
+   */
+  function mapped(worldX, worldY, translated) {
+    const p = look.project(worldX, worldY, 0, cameraView());
+    if (look.isIdentity() && translated) return { x: p.x, y: p.y + camY };
+    return p;
+  }
+
   function cursorWorldPoint() {
     if (!aimPointer.inside) return null;
-    return { x: aimPointer.x + camX, y: aimPointer.y + camY };
+    return worldFromPointer(aimPointer.x, aimPointer.y, false);
   }
 
   /**
@@ -479,7 +522,7 @@
    */
   function aimWorldPoint() {
     if (!aimPointer.inside) return null;
-    return { x: aimPointer.x + camX - fx.shakeX, y: aimPointer.y + camY - fx.shakeY };
+    return worldFromPointer(aimPointer.x, aimPointer.y, true);
   }
 
   /**
@@ -1096,6 +1139,7 @@
     fx.clear();
     grass.clear();
     camX = 0;
+    look.reset();
     sfx("uiPause");
     connect();
     openMenu("start");
@@ -1578,13 +1622,12 @@
       keys.has("KeyQ") ||
       keys.has("KeyA") ||
       keys.has("q") ||
-      keys.has("a") ||
-      keys.has("ArrowLeft")
+      keys.has("a")
     );
   }
 
   function isRightPressed() {
-    return keys.has("KeyD") || keys.has("d") || keys.has("ArrowRight");
+    return keys.has("KeyD") || keys.has("d");
   }
 
   // ──────────────────────── Barre de vie / dégâts ────────────────────────
@@ -1840,14 +1883,22 @@
 
   function currentMiningTarget() {
     if (!playing || !miningPointer.inside) return null;
-    const worldX = miningPointer.x + camX - fx.shakeX;
-    const worldY = miningPointer.y + camY - fx.shakeY;
-    return mining.blockAt(worldX, worldY, groundY);
+    const sx = miningPointer.x - fx.shakeX;
+    const sy = miningPointer.y - fx.shakeY;
+    if (look.isIdentity()) {
+      return mining.blockAt(sx + camX, sy + camY, groundY);
+    }
+    return look.pickSolid(sx, sy, cameraView()) || mining.blockAt(
+      worldFromPointer(miningPointer.x, miningPointer.y, true).x,
+      worldFromPointer(miningPointer.x, miningPointer.y, true).y,
+      groundY,
+    );
   }
 
   function updatePlayerFacing() {
     if (!playing || player.deadTime > 0 || !aimPointer.inside) return;
-    const dx = aimPointer.x + camX - fx.shakeX - centerOf(player.x);
+    const aim = worldFromPointer(aimPointer.x, aimPointer.y, true);
+    const dx = aim.x - centerOf(player.x);
     // Ne pas faire clignoter le miroir du sprite quand la souris est au centre.
     if (Math.abs(dx) > 4) player.facing = dx > 0 ? 1 : -1;
   }
@@ -1938,11 +1989,10 @@
   const pendingPlacements = new Map(); // serial -> { column, row, type }
 
   function placementCellAt(pointerX, pointerY) {
-    const worldX = pointerX + camX - fx.shakeX;
-    const worldY = pointerY + camY - fx.shakeY;
+    const world = worldFromPointer(pointerX, pointerY, true);
     return {
-      column: Math.floor(worldX / BLOCK_SIZE),
-      row: Math.floor((worldY - groundY) / BLOCK_SIZE),
+      column: Math.floor(world.x / BLOCK_SIZE),
+      row: Math.floor((world.y - groundY) / BLOCK_SIZE),
     };
   }
 
@@ -2087,6 +2137,12 @@
     updateOthers(delta);
     grass.update(delta, grassWalkers());
     scenery.updateAmbient(delta, width, height, world.biomeAt(camX + width / 2).id);
+    look.update(delta);
+    look.updateOcclusion({
+      column: Math.floor(centerOf(player.x) / BLOCK_SIZE),
+      row: Math.floor((player.y + player.height * 0.5 - groundY) / BLOCK_SIZE),
+      underground: player.y + player.height > groundY + BLOCK_SIZE * 0.35,
+    }, delta);
     updateProjectiles(delta);
     checkMeleeHits();
     fx.update(delta);
@@ -2633,8 +2689,9 @@
   function drawPlayer() {
     const character = characterFor(identity.character);
     const { column, row } = getSpriteFrame();
-    const centerX = player.x + player.width / 2 - camX;
-    const drawY = player.y - spriteTopPadding;
+    const pos = mapped(player.x + player.width / 2, player.y, true);
+    const centerX = pos.x;
+    const drawY = pos.y - spriteTopPadding;
     // Clignotement pendant l'invulnérabilité qui suit une réapparition.
     const flicker = player.invulnerable > 0 && Math.floor(player.invulnerable * 14) % 2 === 0;
     ctx.save();
@@ -2642,7 +2699,8 @@
     drawSprite(identity.character, column, row, player.facing, centerX, drawY, player.flashTime / FLASH_DURATION);
     ctx.restore();
     if (player.deadTime === 0) {
-      drawCharacterAttack(character, player.attackTime, player.facing, centerX, player.y + player.height * 0.47, character.accent, player.attackSerial);
+      const attack = mapped(player.x + player.width / 2, player.y + player.height * 0.47, true);
+      drawCharacterAttack(character, player.attackTime, player.facing, centerX, attack.y, character.accent, player.attackSerial);
     }
   }
 
@@ -2842,9 +2900,9 @@
     ctx.save();
     ctx.beginPath();
     points.forEach((point, index) => {
-      const x = point.x - camX;
-      if (index === 0) ctx.moveTo(x, point.y);
-      else ctx.lineTo(x, point.y);
+      const pos = mapped(point.x, point.y, true);
+      if (index === 0) ctx.moveTo(pos.x, pos.y);
+      else ctx.lineTo(pos.x, pos.y);
     });
     ctx.strokeStyle = character.accent;
     ctx.lineWidth = 4;
@@ -2865,15 +2923,19 @@
     ctx.globalAlpha = 0.9;
     ctx.fillStyle = character.accent;
     ctx.beginPath();
-    ctx.arc(last.x - camX, last.y, 4, 0, Math.PI * 2);
+    const lastPos = mapped(last.x, last.y, true);
+    ctx.arc(lastPos.x, lastPos.y, 4, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
 
   function drawProjectiles() {
     projectiles.forEach((projectile) => {
-      const screenX = projectile.x - camX;
-      const screenY = projectile.y - camY;
+      const pos = look.isIdentity()
+        ? { x: projectile.x - camX, y: projectile.y - camY }
+        : mapped(projectile.x, projectile.y, false);
+      const screenX = pos.x;
+      const screenY = pos.y;
       if (screenX < -70 || screenX > width + 70) return;
       if (screenY < -90 || screenY > height + 90) return;
       const fade = clamp(projectile.life / Math.min(0.35, projectile.initialLife), 0, 1);
@@ -3119,7 +3181,7 @@
 
   /** Flèche au bord de l'écran pour les joueurs hors du champ de la caméra. */
   function drawOffscreenMarker(peer) {
-    const centerX = peer.rx + player.width / 2 - camX;
+    const centerX = mapped(peer.rx + player.width / 2, peer.ry, true).x;
     const toRight = centerX > width / 2;
     const x = toRight ? width - 24 : 24;
     const y = clamp(peer.ry + player.height / 2, 96, Math.max(96, height - 96));
@@ -3155,13 +3217,15 @@
 
   function drawOthers() {
     others.forEach((peer) => {
-      const centerX = peer.rx + player.width / 2 - camX;
-      const drawY = peer.ry - spriteTopPadding;
+      const pos = mapped(peer.rx + player.width / 2, peer.ry, true);
+      const centerX = pos.x;
+      const drawY = pos.y - spriteTopPadding;
+      const shadow = mapped(peer.rx + player.width / 2, groundAt(peer.rx + player.width / 2) + 7, true);
 
       // Ombre au sol, comme pour le joueur local.
       ctx.fillStyle = "rgba(23, 59, 91, 0.16)";
       ctx.beginPath();
-      ctx.ellipse(centerX, groundAt(peer.rx + player.width / 2) + 7, player.width * (peer.g ? 0.58 : 0.42), 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(shadow.x, shadow.y, player.width * (peer.g ? 0.58 : 0.42), 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
       if (centerX < -spriteDrawSize || centerX > width + spriteDrawSize) {
@@ -3173,7 +3237,8 @@
       const { column, row } = getRemoteFrame(peer);
       drawSprite(peer.character, column, row, peer.f, centerX, drawY, peer.flashTime / FLASH_DURATION);
       if (!peer.dead) {
-        drawCharacterAttack(characterFor(peer.character), peer.a, peer.f, centerX, peer.ry + player.height * 0.47, accent, peer.attackSerial);
+        const attack = mapped(peer.rx + player.width / 2, peer.ry + player.height * 0.47, true);
+        drawCharacterAttack(characterFor(peer.character), peer.a, peer.f, centerX, attack.y, accent, peer.attackSerial);
       }
       drawNameplate(peer.name, accent, peer.hp, centerX, drawY + 6, false);
     });
@@ -3187,8 +3252,11 @@
     others.forEach((peer) => {
       const cursor = peer.cursorDraw;
       if (!cursor || peer.dead) return;
-      const screenX = cursor.x - camX;
-      const screenY = cursor.y - camY;
+      const pos = look.isIdentity()
+        ? { x: cursor.x - camX, y: cursor.y - camY }
+        : mapped(cursor.x, cursor.y, false);
+      const screenX = pos.x;
+      const screenY = pos.y;
       // Hors champ : inutile de coller une flèche au bord, le joueur a déjà
       // son repère (flèche de hors-écran) de son côté de l'écran.
       if (screenX < -20 || screenX > width + 20 || screenY < -20 || screenY > height + 20) return;
@@ -3286,6 +3354,7 @@
 
   /** Touffes d'herbe décoratives de la prairie, posées sur le relief. */
   function drawTufts() {
+    if (!look.isIdentity()) return;
     if (!(tileset.complete && tileset.naturalWidth > 0)) return;
     const firstTile = Math.floor(camX / tileDraw) - 1;
     const startX = -(camX % tileDraw) - tileDraw;
@@ -3320,6 +3389,43 @@
     }
   }
 
+  function drawCompass() {
+    const size = 34;
+    const x = width - size - 18;
+    const y = 18;
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = "rgba(16, 32, 48, 0.55)";
+    ctx.beginPath();
+    ctx.arc(x + size / 2, y + size / 2, size / 2 + 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.translate(x + size / 2, y + size / 2);
+    ctx.rotate(-look.yaw);
+    ctx.fillStyle = "#f4f0e4";
+    ctx.beginPath();
+    ctx.moveTo(0, -size * 0.38);
+    ctx.lineTo(5, 4);
+    ctx.lineTo(0, 1);
+    ctx.lineTo(-5, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#d94a4a";
+    ctx.beginPath();
+    ctx.moveTo(0, -size * 0.38);
+    ctx.lineTo(3.5, -2);
+    ctx.lineTo(-3.5, -2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    ctx.font = "bold 10px " + FONT_STACK;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "rgba(255,255,255,0.88)";
+    ctx.fillText(look.facingName, x + size / 2, y + size + 6);
+    ctx.restore();
+  }
+
   function draw() {
     ctx.clearRect(0, 0, width, height);
 
@@ -3329,7 +3435,7 @@
 
     // Décor des biomes : ciel et lointains fixes, puis le monde (terrain,
     // héros, effets) décalé par la caméra verticale camY.
-    const view = { width, height, camX, camY, baseY: groundY, time: lastTime / 1000 };
+    const view = Object.assign(cameraView(), { time: lastTime / 1000 });
     scenery.ensurePatterns(ctx);
     scenery.drawSky(ctx, width, height, camX, view.time);
     scenery.drawFarLayers(ctx, width, height, camX);
@@ -3339,12 +3445,13 @@
     const miningTarget = currentMiningTarget();
     if (miningTarget) {
       const progress = miningPointer.down && miningTarget.key === miningTargetKey ? miningElapsed / miningTime : 0;
-      mining.drawTarget(ctx, miningTarget, progress, camX, camY);
+      mining.drawTarget(ctx, miningTarget, progress, camX, camY, view);
     }
 
-    // Le reste du monde (herbes, héros, effets) en repère monde, décalé par camY.
+    // Le reste du monde (herbes, héros, effets). En vue sud, le décalage
+    // vertical historique est conservé ; sinon tout est déjà en repère écran.
     ctx.save();
-    ctx.translate(0, -Math.round(camY));
+    if (look.isIdentity()) ctx.translate(0, -Math.round(camY));
     drawTufts();
     scenery.drawProps(ctx, view);
     scenery.drawPlatforms(ctx, view);
@@ -3354,11 +3461,12 @@
 
     // Ombre discrète pour ancrer le sprite au sol pendant le saut.
     const meX = player.x + player.width / 2;
+    const shadow = mapped(meX, groundAt(meX) + 7, true);
     ctx.fillStyle = "rgba(23, 59, 91, 0.18)";
     ctx.beginPath();
     ctx.ellipse(
-      meX - camX,
-      groundAt(meX) + 7,
+      shadow.x,
+      shadow.y,
       player.width * (player.grounded ? 0.58 : 0.42),
       5,
       0,
@@ -3369,16 +3477,18 @@
 
     drawPlayer();
     // Notre propre pseudo et notre barre de vie, pour vérifier d'un coup d'œil.
+    const plate = mapped(player.x + player.width / 2, player.y - spriteTopPadding + 6, true);
     drawNameplate(
       identity.name,
       accentFor(identity.character),
       player.hp,
-      player.x + player.width / 2 - camX,
-      player.y - spriteTopPadding + 6,
+      plate.x,
+      plate.y,
       true,
     );
     drawProjectiles();
-    fx.draw(ctx, camX);
+    if (look.isIdentity()) fx.draw(ctx, camX);
+    else fx.draw(ctx, camX, (x, y) => look.project(x, y, 0, view));
     // Curseurs des autres joueurs, par-dessus le monde.
     drawPeerCursors();
     ctx.restore(); // fin du décalage vertical du monde
@@ -3388,6 +3498,7 @@
 
     scenery.drawGrade(ctx, width, height, camX);
     fx.drawOverlay(ctx, width, height);
+    drawCompass();
   }
 
   function frame(time) {
@@ -3506,12 +3617,15 @@
       return;
     }
 
+    if (look.setFacingByArrow(event.code)) {
+      event.preventDefault();
+      return;
+    }
+
     const controlCode = [
       "KeyQ",
       "KeyA",
       "KeyD",
-      "ArrowLeft",
-      "ArrowRight",
       "Space",
       "KeyX",
     ].includes(event.code);
@@ -3649,6 +3763,15 @@
     },
     get camX() { return camX; },
     get camY() { return camY; },
+    get camera() {
+      return {
+        facing: look.facingId,
+        name: look.facingName,
+        yaw: look.yaw,
+        identity: look.isIdentity(),
+      };
+    },
+    blockAlpha: (column, row) => look.alpha(column, row, 0),
     get groundY() { return groundY; },
     placed: () => mining.getPlaced(),
     inventory: () => mining.inventory(),

@@ -608,9 +608,161 @@ window.PixWorldMining = (() => {
       }
     }
 
+    function topFill(type) {
+      if (type === "grass") return "#7ed957";
+      if (type === "dirt") return "#c9945e";
+      return "#9aa8ad";
+    }
+
+    function sideFill(type) {
+      if (type === "grass") return "#5a8f32";
+      if (type === "dirt") return "#8a5530";
+      return "#4d5c62";
+    }
+
+    function fillQuad(ctx, a, b, c, d, color) {
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.lineTo(d.x, d.y);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+    /** Point écran d'un coin de bloc (z monde, 0 = plan de jeu). */
+    function projectCorner(worldX, worldY, worldZ, view) {
+      const look = view && view.look;
+      if (look && typeof look.project === "function") {
+        return look.project(worldX, worldY, worldZ, view);
+      }
+      return {
+        x: worldX - (Number(view.camX) || 0),
+        y: worldY - (Number(view.camY) || 0),
+        depth: 0,
+      };
+    }
+
+    function blockAlpha(column, row, zTile, view) {
+      const look = view && view.look;
+      if (look && typeof look.alpha === "function") return look.alpha(column, row, zTile);
+      return 1;
+    }
+
     /** Image ou canvas utilisable (les variantes miroir sont des canvas). */
     function drawable(image) {
       return image && (image.naturalWidth > 0 || image.width > 0);
+    }
+
+    function paintFrontFace(ctx, effectiveType, screenX, y, column, row, images) {
+      const entry = images[effectiveType];
+      const variants = Array.isArray(entry) ? entry : entry ? [entry] : null;
+      if (variants && variants.length && drawable(variants[0])) {
+        const orientation = hashText(column + ":" + row) & (effectiveType === "grass" ? 1 : 3);
+        const image = variants[Math.min(orientation, variants.length - 1)];
+        if (drawable(image)) {
+          if (orientation === 1 || orientation === 3) {
+            ctx.save();
+            ctx.translate(screenX + blockSize, 0);
+            ctx.scale(-1, 1);
+            if (orientation === 3) {
+              ctx.translate(0, y + blockSize);
+              ctx.scale(1, -1);
+              ctx.drawImage(image, 0, 0, blockSize, blockSize);
+            } else {
+              ctx.drawImage(image, 0, y, blockSize, blockSize);
+            }
+            ctx.restore();
+          } else if (orientation === 2) {
+            ctx.save();
+            ctx.translate(0, y + blockSize);
+            ctx.scale(1, -1);
+            ctx.drawImage(image, screenX, 0, blockSize, blockSize);
+            ctx.restore();
+          } else {
+            ctx.drawImage(image, screenX, y, blockSize, blockSize);
+          }
+          return;
+        }
+      }
+      drawFallbackBlock(ctx, effectiveType, screenX, y, blockSize, column, row);
+    }
+
+    function effectiveBlockType(column, row, type) {
+      return type === "grass" && solidAt(column, row - 1) ? "dirt" : type;
+    }
+
+    /**
+     * Faces 3/4 d'un cube : dessus (si exposé) et côté (si voisin vide).
+     * La face avant reste le rectangle historique, pour ne pas bouger les clics.
+     */
+    function paintCubeBevels(ctx, type, column, row, zTile, view) {
+      const baseY = Number(view.baseY) || 0;
+      const x = column * blockSize;
+      const y = baseY + row * blockSize;
+      const z0 = zTile * blockSize;
+      const z1 = z0 - blockSize;
+      const exposedTop = zTile === 0 ? !solidAt(column, row - 1) : row <= 0;
+      const exposedRight = zTile === 0 ? !solidAt(column + 1, row) : true;
+      if (exposedTop) {
+        const a = projectCorner(x, y, z0, view);
+        const b = projectCorner(x + blockSize, y, z0, view);
+        const c = projectCorner(x + blockSize, y, z1, view);
+        const d = projectCorner(x, y, z1, view);
+        fillQuad(ctx, a, b, c, d, topFill(type));
+      }
+      if (exposedRight) {
+        const a = projectCorner(x + blockSize, y, z0, view);
+        const b = projectCorner(x + blockSize, y + blockSize, z0, view);
+        const c = projectCorner(x + blockSize, y + blockSize, z1, view);
+        const d = projectCorner(x + blockSize, y, z1, view);
+        fillQuad(ctx, a, b, c, d, sideFill(type));
+      }
+    }
+
+    function paintProjectedCube(ctx, type, column, row, zTile, view) {
+      const baseY = Number(view.baseY) || 0;
+      const x = column * blockSize;
+      const y = baseY + row * blockSize;
+      const z0 = zTile * blockSize;
+      const z1 = z0 - blockSize;
+      const tl = projectCorner(x, y, z0, view);
+      const tr = projectCorner(x + blockSize, y, z0, view);
+      const bl = projectCorner(x, y + blockSize, z0, view);
+      const br = projectCorner(x + blockSize, y + blockSize, z0, view);
+      const ttl = projectCorner(x, y, z1, view);
+      const ttr = projectCorner(x + blockSize, y, z1, view);
+      const bbr = projectCorner(x + blockSize, y + blockSize, z1, view);
+      const height = Number(view.height) || 0;
+      const width = Number(view.width) || 0;
+      const minX = Math.min(tl.x, tr.x, bl.x, br.x, ttl.x, ttr.x);
+      const maxX = Math.max(tl.x, tr.x, bl.x, br.x, ttl.x, ttr.x);
+      const minY = Math.min(tl.y, tr.y, bl.y, br.y, ttl.y, ttr.y);
+      const maxY = Math.max(tl.y, tr.y, bl.y, br.y, ttl.y, ttr.y);
+      if (maxX < -blockSize || minX > width + blockSize || maxY < -blockSize || minY > height + blockSize) {
+        return;
+      }
+      const depth = (tl.depth + br.depth) * 0.5;
+      // Loin → près : on dessine d'abord le dessus et le flanc, puis l'avant.
+      if (depth <= 0 || zTile !== 0) {
+        fillQuad(ctx, ttl, ttr, projectCorner(x + blockSize, y + blockSize, z1, view), projectCorner(x, y + blockSize, z1, view), sideFill(type));
+      }
+      fillQuad(ctx, tl, tr, ttr, ttl, topFill(type));
+      fillQuad(ctx, tr, br, bbr, ttr, sideFill(type));
+      fillQuad(ctx, tl, tr, br, bl, BLOCKS[type] ? BLOCKS[type].base : "#809196");
+      if (type === "grass") {
+        fillQuad(ctx, tl, tr, { x: tr.x + (br.x - tr.x) * 0.22, y: tr.y + (br.y - tr.y) * 0.22 }, { x: tl.x + (bl.x - tl.x) * 0.22, y: tl.y + (bl.y - tl.y) * 0.22 }, "#75c83a");
+      }
+    }
+
+    /**
+     * Type d'une tranche visuelle hors du plan de jeu : le terrain naturel
+     * (la prairie qui s'étend au nord et au sud), jamais les trous minés.
+     */
+    function decorativeType(column, row) {
+      if (column < 0 || column >= columns || row < 0 || row >= LAYER_TYPES.length) return null;
+      return LAYER_TYPES[row] || null;
     }
 
     /**
@@ -619,6 +771,9 @@ window.PixWorldMining = (() => {
      * textures (les textures sont sans couture, donc tout se recolle).
      * `textures[type]` peut être une image seule ou un tableau de 4 variantes
      * [normal, miroir H, miroir V, double miroir].
+     *
+     * `view.look` (optionnel) fournit la projection 2,5D et l'opacité des
+     * blocs qui masquent le joueur. Sans caméra, le rendu reste identique.
      */
     function drawTerrain(ctx, view, textures) {
       const width = Math.max(0, Number(view.width) || 0);
@@ -626,72 +781,75 @@ window.PixWorldMining = (() => {
       const camY = Number(view.camY) || 0;
       const baseY = Number(view.baseY) || 0;
       const height = Number(view.height) || 0;
-      const first = Math.max(0, Math.floor(camX / blockSize));
-      const last = Math.min(columns, Math.ceil((camX + width) / blockSize) + 1);
+      const look = view && view.look;
+      const rotated = look && typeof look.isIdentity === "function" ? !look.isIdentity() : false;
+      const zExtent = look && typeof look.zExtent === "function" ? look.zExtent() : 0;
+      const first = Math.max(0, Math.floor(camX / blockSize) - (rotated ? 8 : 0));
+      const last = Math.min(columns, Math.ceil((camX + width) / blockSize) + 1 + (rotated ? 8 : 0));
       const topRow = Math.min(0, minPlacedRow);
       const bottomRow = Math.min(LAYER_TYPES.length, Math.ceil((camY + height - baseY) / blockSize) + 1);
       const firstRow = Math.max(topRow, Math.floor((camY - baseY) / blockSize) - 1);
       const images = textures || {};
       ctx.save();
       ctx.imageSmoothingEnabled = false;
+
+      const jobs = [];
+      function enqueue(column, row, zTile, type, decorative) {
+        const worldX = column * blockSize + blockSize / 2;
+        const worldY = baseY + row * blockSize + blockSize / 2;
+        const projected = projectCorner(worldX, worldY, zTile * blockSize, view);
+        jobs.push({ column, row, zTile, type, decorative, depth: projected.depth });
+      }
+
       for (let column = first; column < last; column++) {
-        const screenX = Math.round(column * blockSize - camX);
         for (let row = firstRow; row < bottomRow; row++) {
           const type = blockType(column, row);
-          if (!type) continue;
-          const y = Math.round(baseY + row * blockSize - camY);
-          if (y > height || y + blockSize < 0) continue;
-          // Une herbe enfouie sous un autre bloc se dessine comme de la terre.
-          const buriedGrass = type === "grass" && solidAt(column, row - 1);
-          const effectiveType = buriedGrass ? "dirt" : type;
-          const entry = images[effectiveType];
-          const variants = Array.isArray(entry) ? entry : entry ? [entry] : null;
-          if (variants && variants.length && drawable(variants[0])) {
-            // L'herbe garde sa calotte vers le haut : miroir horizontal seul.
-            const orientation = hashText(column + ":" + row) & (effectiveType === "grass" ? 1 : 3);
-            const image = variants[Math.min(orientation, variants.length - 1)];
-            if (drawable(image)) {
-              if (orientation === 1 || orientation === 3) {
-                ctx.save();
-                ctx.translate(screenX + blockSize, 0);
-                ctx.scale(-1, 1);
-                if (orientation === 3) {
-                  ctx.translate(0, y + blockSize);
-                  ctx.scale(1, -1);
-                  ctx.drawImage(image, 0, 0, blockSize, blockSize);
-                } else {
-                  ctx.drawImage(image, 0, y, blockSize, blockSize);
-                }
-                ctx.restore();
-              } else if (orientation === 2) {
-                ctx.save();
-                ctx.translate(0, y + blockSize);
-                ctx.scale(1, -1);
-                ctx.drawImage(image, screenX, 0, blockSize, blockSize);
-                ctx.restore();
-              } else {
-                ctx.drawImage(image, screenX, y, blockSize, blockSize);
-              }
-              continue;
+          if (type) enqueue(column, row, 0, effectiveBlockType(column, row, type), false);
+        }
+        if (zExtent > 0) {
+          for (let zTile = -zExtent; zTile <= zExtent; zTile++) {
+            if (zTile === 0) continue;
+            for (let row = 0; row < 2; row++) {
+              const type = decorativeType(column, row);
+              if (type) enqueue(column, row, zTile, type, true);
             }
           }
-          drawFallbackBlock(ctx, effectiveType, screenX, y, blockSize, column, row);
         }
+      }
+
+      jobs.sort((a, b) => a.depth - b.depth || a.zTile - b.zTile || b.row - a.row || a.column - b.column);
+
+      for (let i = 0; i < jobs.length; i++) {
+        const job = jobs[i];
+        const amount = blockAlpha(job.column, job.row, job.zTile, view);
+        if (amount <= 0.02) continue;
+        const y = Math.round(baseY + job.row * blockSize - camY);
+        const screenX = Math.round(job.column * blockSize - camX);
+        if (!rotated && job.zTile === 0 && (y > height || y + blockSize < 0)) continue;
+        ctx.save();
+        if (amount < 0.995) ctx.globalAlpha = amount;
+        if (rotated || job.zTile !== 0) {
+          paintProjectedCube(ctx, job.type, job.column, job.row, job.zTile, view);
+        } else {
+          paintCubeBevels(ctx, job.type, job.column, job.row, 0, view);
+          paintFrontFace(ctx, job.type, screenX, y, job.column, job.row, images);
+        }
+        ctx.restore();
       }
       ctx.restore();
     }
 
     function drawDrops(ctx, view, textures) {
-      const camX = Number(view.camX) || 0;
-      const camY = Number(view.camY) || 0;
       const baseY = Number(view.baseY) || 0;
       const time = Number(view.time) || 0;
       const images = textures || {};
       ctx.save();
       ctx.imageSmoothingEnabled = false;
       drops.forEach((drop) => {
-        const x = drop.x - camX;
-        const y = baseY + drop.depth + Math.sin(time * 4 + drop.phase) * 1.5 - camY;
+        const worldY = baseY + drop.depth + Math.sin(time * 4 + drop.phase) * 1.5;
+        const projected = projectCorner(drop.x, worldY, 0, view);
+        const x = projected.x;
+        const y = projected.y;
         if (x < -DROP_SIZE || x > Number(view.width) + DROP_SIZE || y < -DROP_SIZE || y > Number(view.height) + DROP_SIZE) return;
         const entry = images[drop.type];
         const image = Array.isArray(entry) ? entry[0] : entry;
@@ -722,10 +880,13 @@ window.PixWorldMining = (() => {
       ctx.restore();
     }
 
-    function drawTarget(ctx, block, progress, camX, camY) {
+    function drawTarget(ctx, block, progress, camX, camY, view) {
       if (!block) return;
-      const x = Math.round(block.x - (Number(camX) || 0));
-      const y = Math.round(block.y - (Number(camY) || 0));
+      const projected = view
+        ? projectCorner(block.x, block.y, 0, view)
+        : { x: block.x - (Number(camX) || 0), y: block.y - (Number(camY) || 0) };
+      const x = Math.round(projected.x);
+      const y = Math.round(projected.y);
       const size = block.size || blockSize;
       const amount = clamp(Number(progress) || 0, 0, 1);
       ctx.save();
