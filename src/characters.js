@@ -13,6 +13,7 @@
 (() => {
   "use strict";
 
+  const physicsDefaults = window.PixWorldProjectilePhysics.DEFAULTS;
   const characters = [
     {
       id: "ninja",
@@ -22,12 +23,15 @@
       accent: "#ff8a5c",
       attackStyle: "shuriken",
       attackName: "Shuriken",
-      attackDescription: "Étoile tournoyante · tir rapide",
+      attackDescription: "Étoile rapide · chute légère",
       attackDuration: 0.36,
       // Le projectile part un peu après le début du geste (préparation).
       projectileDelay: 0.08,
-      projectileSpeed: 590,
-      projectileLife: 1.6,
+      projectileSpeed: physicsDefaults.ninja.speed,
+      projectileGravity: physicsDefaults.ninja.gravity,
+      projectileGravityDelay: physicsDefaults.ninja.gravityDelay,
+      projectileLife: physicsDefaults.ninja.life,
+      projectileScale: physicsDefaults.ninja.scale,
       attackDamage: 8,
       knockback: 180,
       hitSound: "hitShuriken",
@@ -43,12 +47,15 @@
       accent: "#7ee39a",
       attackStyle: "arrow",
       attackName: "Flèche de vent",
-      attackDescription: "Tir tendu · portée longue",
+      attackDescription: "Longue portée · chute marquée",
       attackDuration: 0.48,
       // La flèche est décochée sur la 3e image : corde tirée puis relâchée.
       projectileDelay: 0.24,
-      projectileSpeed: 820,
-      projectileLife: 2.2,
+      projectileSpeed: physicsDefaults.archer.speed,
+      projectileGravity: physicsDefaults.archer.gravity,
+      projectileGravityDelay: physicsDefaults.archer.gravityDelay,
+      projectileLife: physicsDefaults.archer.life,
+      projectileScale: physicsDefaults.archer.scale,
       attackDamage: 12,
       knockback: 230,
       hitSound: "hitArrow",
@@ -82,12 +89,15 @@
       accent: "#c792ea",
       attackStyle: "orb",
       attackName: "Orbe astral",
-      attackDescription: "Projectile magique · large et stable",
+      attackDescription: "Orbe lent · gravité légère",
       attackDuration: 0.58,
       // L'orbe se forme dans la main pendant l'incantation avant de partir.
       projectileDelay: 0.2,
-      projectileSpeed: 430,
-      projectileLife: 2.7,
+      projectileSpeed: physicsDefaults.mage.speed,
+      projectileGravity: physicsDefaults.mage.gravity,
+      projectileGravityDelay: physicsDefaults.mage.gravityDelay,
+      projectileLife: physicsDefaults.mage.life,
+      projectileScale: physicsDefaults.mage.scale,
       attackDamage: 16,
       knockback: 260,
       hitSound: "hitOrb",

@@ -74,7 +74,9 @@ Quatre combattants ont chacun **leur propre feuille de sprite** (plus aucune tei
 
 Le choix du héros est synchronisé entre joueurs : sprites, mouvements, déclenchements d'attaque, points de vie et K.O. sont visibles par les autres. Le sprite se tourne vers le curseur (gauche / droite), même en marchant dans l'autre sens ; le regard suit aussi le défilement de la caméra. Sans curseur actif, notamment au toucher, il garde le sens de la marche.
 
-**Les projectiles visent le curseur.** Shuriken, flèche et orbe partent dans la direction du pointeur, pas seulement à gauche ou à droite : tu peux tirer en l'air, en diagonale ou vers le sol, et le projectile pivote dans son sens de vol (sa traînée aussi). Les tirs des autres joueurs suivent leur curseur partagé, et sans curseur connu (souris hors de la fenêtre, toucher) le tir file droit devant le personnage. Les blocs arrêtent toujours le projectile au premier contact, quelle que soit la trajectoire.
+**Les projectiles visent le curseur et retombent.** Shuriken, flèche et orbe partent dans la direction du pointeur, pas seulement à gauche ou à droite : tu peux tirer en l'air, en diagonale ou vers le sol. Une gravité propre à chaque attaque courbe ensuite leur vol : le shuriken retombe doucement, la flèche plus franchement et l'orbe reste léger. Le projectile pivote dans son sens de vol (sa traînée aussi). Les tirs des autres joueurs suivent leur curseur partagé et leurs paramètres physiques sont synchronisés par l'arène. Sans curseur connu (souris hors de la fenêtre, toucher), le tir file droit devant le personnage. Les blocs arrêtent toujours le projectile au premier contact, quelle que soit la trajectoire.
+
+**Paramètres de tir.** Le bouton **⚙ Paramètres** du HUD (ou `P`) ouvre l'atelier de tir. Pour chaque héros à distance, tu peux régler la vitesse, la gravité, le délai avant la chute, la durée maximale, la taille et la zone de collision. Les valeurs sont enregistrées dans le navigateur, bornées côté serveur et partagées pour que tous voient la même physique. Active **Tracer la trajectoire avant le tir** pour afficher l'arc en pointillés jusqu'au sol ou au premier mur ; règle sa longueur et masque aussi les traînées si tu préfères. Les réglages de Raiden sont remplacés par une note, car son attaque est une coupe de mêlée.
 
 ## Barre de vie
 
@@ -194,6 +196,7 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `D` ou flèche droite : aller à droite
 - `Espace` : sauter
 - `X` : lancer l'attaque du héros
+- `P` : ouvrir / fermer les paramètres de tir (vitesse, gravité, durée, taille, aperçu de trajectoire)
 - `T` : ouvrir la discussion (`Entrée` envoie, `Échap` referme, `/tp` et `/kill` commandent l'arène)
 - Clic gauche sur un bloc : miner (maintenir 2 secondes) ; clic dans le vide : attaque du héros
 - Clic droit : poser le bloc sélectionné (contre un bloc existant, à portée)
@@ -206,7 +209,8 @@ sont synchronisés, mais ce prototype n’est pas un serveur de combat anti-tric
 - `index.html` — canvas, HUD et structure de l'écran titre.
 - `assets/menu.css` — menu animé et responsive, sélection des héros et écran pause.
 - `src/characters.js` — catalogue des combattants : feuille de sprite, réglages de combat (dégâts, recul, délai du projectile) et sons de chaque héros.
-- `src/game.js` — boucle de jeu, spritesheets, barres de vie, combat (recul, K.O., combo), effets d'attaque, minage, drops, inventaire et interpolation des joueurs distants.
+- `src/projectile-physics.js` — préréglages et limites des projectiles, partagés entre le navigateur et le serveur.
+- `src/game.js` — boucle de jeu, spritesheets, barres de vie, combat (recul, K.O., combo), physique des projectiles et aperçu, paramètres, minage, drops et joueurs distants.
 - `src/mining.js` — grille de blocs (herbe, terre, pierre), temps de minage, collisions de surface, drops physiques et inventaire (`window.PixWorldMining`).
 - `assets/blocks/` — textures pixel art CC0 des blocs minables et atlas source Kenney.
 - `src/effects.js` — particules (dont les brins d'herbe), chiffres de dégâts, ondes de choc, secousses de caméra, flashs et vignette.
@@ -231,7 +235,7 @@ npm test
 
 Le démarrage complet de la page est rejoué sans navigateur (`test/game-boot.test.js`) : chargement des scripts, quatre héros affichés, connexion à l'arène, entrée en jeu et arrivée d'un autre joueur — de quoi repérer immédiatement un script qui planterait au chargement.
 
-Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, quantités et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, minage partagé et ramassage unique du butin (`test/net.test.js`, `test/server.test.js`). Les scénarios de combat (`test/combat.test.js`) rejouent les quatre styles d'attaque face à un mur, la mort avec inventaire, la réapparition, les confirmations réseau tardives et la récupération du stuff hors ligne. Les entrées (`test/input.test.js`) couvrent la visée au curseur en marchant dans l'autre sens, le déplacement de caméra, le HUD, la pause et le toucher, ainsi que la direction des projectiles (en diagonale, vers le bas, et sans curseur). La discussion (`test/chat.test.js`) rejoue la touche `T`, l'envoi d'une ligne - espaces et guillemets compris -, l'affichage des messages reçus, l'exécution des commandes `/tp` et `/kill`, le relais des curseurs et le repli hors ligne. Les tests de minage et de serveur vérifient aussi les trous rebouchés plusieurs fois et le minage maintenu lorsqu'un bloc est reposé entre deux images.
+Les tests vérifient aussi le catalogue des héros et leurs feuilles de sprites (`test/characters.test.js`), le moteur audio et la banque de sons (`test/audio.test.js`, `test/sfx-bank.test.js`), les effets visuels (`test/effects.test.js`), le monde et son rendu (`test/world.test.js`, `test/scenery.test.js`), l'herbe interactive (`test/grass.test.js`), le système de minage — couches, temps, collisions, drops, quantités et état partagé (`test/mining.test.js`) — ainsi que le réseau : reconnexion, états verticaux, réglages physiques des projectiles bornés côté serveur, minage partagé et ramassage unique du butin (`test/net.test.js`, `test/server.test.js`). Les scénarios de combat (`test/combat.test.js`) rejouent les quatre styles d'attaque face à un mur, la mort avec inventaire, la réapparition, les confirmations réseau tardives et la récupération du stuff hors ligne. Les entrées (`test/input.test.js`) couvrent la visée au curseur en marchant dans l'autre sens, le déplacement de caméra, le HUD, la pause et le toucher, les réglages sauvegardés par héros, la courbure par gravité et l'aperçu en pointillés avant le lancement. La discussion (`test/chat.test.js`) rejoue la touche `T`, l'envoi d'une ligne - espaces et guillemets compris -, l'affichage des messages reçus, l'exécution des commandes `/tp` et `/kill`, le relais des curseurs et le repli hors ligne. Les tests de minage et de serveur vérifient aussi les trous rebouchés plusieurs fois et le minage maintenu lorsqu'un bloc est reposé entre deux images.
 
 ## Sprites et décor
 

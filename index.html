@@ -159,6 +159,43 @@
         border-color: rgb(255 107 107 / 55%);
       }
 
+      .settings-toggle {
+        display: inline-flex;
+        min-height: 28px;
+        align-items: center;
+        gap: 6px;
+        margin-left: 5px;
+        padding: 0 9px;
+        border: 1px solid rgb(255 255 255 / 28%);
+        border-radius: 8px;
+        background: rgb(255 255 255 / 10%);
+        color: #fff;
+        font: inherit;
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 1;
+        cursor: pointer;
+        pointer-events: auto;
+        transition: background 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+      }
+
+      .settings-toggle:hover,
+      .settings-toggle[aria-expanded="true"] {
+        border-color: rgb(255 209 110 / 65%);
+        background: rgb(255 209 110 / 18%);
+        transform: translateY(-1px);
+      }
+
+      .settings-toggle:focus-visible {
+        outline: 2px solid #ffbf67;
+        outline-offset: 2px;
+      }
+
+      .settings-toggle-icon {
+        color: #ffd16e;
+        font-size: 15px;
+      }
+
       kbd {
         display: inline-grid;
         min-width: 25px;
@@ -806,6 +843,9 @@
           <span class="control"><kbd class="space">CLIC G</kbd> miner</span>
           <span class="control"><kbd class="space">CLIC D</kbd> poser</span>
           <span class="control"><kbd>ESC</kbd> menu</span>
+          <button class="settings-toggle" id="settings-toggle" type="button" title="Ouvrir les paramètres (P)" aria-label="Ouvrir les paramètres" aria-controls="projectile-settings" aria-expanded="false" aria-pressed="false">
+            <span class="settings-toggle-icon" aria-hidden="true">⚙</span><span>Paramètres</span>
+          </button>
           <button class="sound-toggle" id="sound-toggle" type="button" title="Couper le son (M)" aria-label="Couper le son (M)" aria-pressed="false">🔊</button>
         </div>
       </section>
@@ -861,7 +901,102 @@
         <p class="hotbar-hint">MOLETTE · CHOISIR — CLIC DROIT · POSER</p>
       </aside>
 
-      <p class="hint">A/D SE DÉPLACER · ESPACE SAUTE · SOURIS VISER · T · DISCUSSION (/TP · /KILL) · CLIC GAUCHE · MINER 2 S · CLIC DROIT · POSER</p>
+      <section class="projectile-settings-overlay" id="projectile-settings" role="dialog" aria-modal="true" aria-labelledby="projectile-settings-title" hidden>
+        <div class="projectile-settings-panel">
+          <header class="projectile-settings-header">
+            <div>
+              <p class="settings-kicker">ATELIER DE TIR · RÉGLAGES PERSONNELS</p>
+              <h2 id="projectile-settings-title">Paramètres des projectiles</h2>
+              <p class="settings-intro">Chaque héros garde sa propre physique. Tes réglages sont sauvegardés sur cet appareil et partagés avec l’arène.</p>
+            </div>
+            <button class="settings-close" id="settings-close" type="button" title="Fermer les paramètres" aria-label="Fermer les paramètres">×</button>
+          </header>
+
+          <nav class="settings-character-tabs" id="settings-character-tabs" role="tablist" aria-label="Choisir le personnage à régler"></nav>
+
+          <div class="settings-character-summary">
+            <span class="settings-character-icon" id="settings-character-icon" aria-hidden="true">✦</span>
+            <div>
+              <h3 id="settings-character-name">Kage · Shuriken</h3>
+              <p id="settings-character-description">Étoile tournoyante · tir rapide</p>
+            </div>
+            <button class="settings-reset" id="settings-reset" type="button">Réinitialiser ce héros</button>
+          </div>
+
+          <div class="projectile-settings-content">
+            <section class="settings-projectile-controls" id="settings-projectile-controls" aria-label="Physique du projectile">
+              <div class="settings-section-heading">
+                <div>
+                  <h3>Physique du tir</h3>
+                  <p>La gravité courbe la trajectoire après le délai choisi.</p>
+                </div>
+                <span class="settings-section-tag">PIXELS · SECONDE</span>
+              </div>
+              <div class="settings-control-grid">
+                <label class="settings-range" for="settings-projectile-speed">
+                  <span class="settings-range-heading"><span>Vitesse au lancement</span><output id="settings-projectile-speed-value" for="settings-projectile-speed">590 px/s</output></span>
+                  <input id="settings-projectile-speed" type="range" min="180" max="1400" step="10" value="590" />
+                  <span class="settings-range-hint">Rapidité initiale du projectile</span>
+                </label>
+                <label class="settings-range" for="settings-projectile-gravity">
+                  <span class="settings-range-heading"><span>Force de gravité</span><output id="settings-projectile-gravity-value" for="settings-projectile-gravity">300 px/s²</output></span>
+                  <input id="settings-projectile-gravity" type="range" min="0" max="2200" step="20" value="300" />
+                  <span class="settings-range-hint">À 0, le tir ne tombe pas</span>
+                </label>
+                <label class="settings-range" for="settings-projectile-delay">
+                  <span class="settings-range-heading"><span>Début de la chute</span><output id="settings-projectile-delay-value" for="settings-projectile-delay">0,20 s</output></span>
+                  <input id="settings-projectile-delay" type="range" min="0" max="1.5" step="0.05" value="0.2" />
+                  <span class="settings-range-hint">Temps avant que la gravité agisse</span>
+                </label>
+                <label class="settings-range" for="settings-projectile-life">
+                  <span class="settings-range-heading"><span>Durée maximale du vol</span><output id="settings-projectile-life-value" for="settings-projectile-life">1,6 s</output></span>
+                  <input id="settings-projectile-life" type="range" min="0.4" max="4" step="0.1" value="1.6" />
+                  <span class="settings-range-hint">Le tir disparaît à la fin du temps</span>
+                </label>
+                <label class="settings-range" for="settings-projectile-scale">
+                  <span class="settings-range-heading"><span>Taille du projectile</span><output id="settings-projectile-scale-value" for="settings-projectile-scale">100 %</output></span>
+                  <input id="settings-projectile-scale" type="range" min="0.5" max="1.75" step="0.05" value="1" />
+                  <span class="settings-range-hint">La zone de collision suit la taille</span>
+                </label>
+              </div>
+            </section>
+
+            <p class="settings-melee-note" id="settings-melee-note" hidden>Raiden combat au corps-à-corps : il n’a pas de projectile à régler.</p>
+
+            <section class="settings-display-controls" aria-labelledby="settings-display-title">
+              <div class="settings-section-heading">
+                <div>
+                  <h3 id="settings-display-title">Aperçu et effets</h3>
+                  <p>Affichage local, sans modifier les réglages des autres joueurs.</p>
+                </div>
+              </div>
+              <div class="settings-switch-grid">
+                <label class="settings-switch-row" for="settings-trajectory-preview">
+                  <span><strong>Tracer la trajectoire avant le tir</strong><small>Affiche l’arc prédit jusqu’au sol, à un mur ou à la durée choisie.</small></span>
+                  <input id="settings-trajectory-preview" type="checkbox" />
+                  <span class="settings-switch" aria-hidden="true"></span>
+                </label>
+                <label class="settings-switch-row" for="settings-projectile-trails">
+                  <span><strong>Afficher les traînées</strong><small>Garde les effets de vitesse et les particules derrière les tirs.</small></span>
+                  <input id="settings-projectile-trails" type="checkbox" checked />
+                  <span class="settings-switch" aria-hidden="true"></span>
+                </label>
+                <label class="settings-range settings-preview-range" for="settings-preview-duration">
+                  <span class="settings-range-heading"><span>Longueur de l’aperçu</span><output id="settings-preview-duration-value" for="settings-preview-duration">2,0 s</output></span>
+                  <input id="settings-preview-duration" type="range" min="0.4" max="4" step="0.1" value="2" />
+                  <span class="settings-range-hint">Ne dépasse jamais la durée de vie du tir</span>
+                </label>
+              </div>
+            </section>
+          </div>
+          <footer class="settings-footer">
+            <span>Les collisions avec le terrain restent actives.</span>
+            <button class="settings-done" id="settings-done" type="button">Terminé <span aria-hidden="true">✓</span></button>
+          </footer>
+        </div>
+      </section>
+
+      <p class="hint">A/D SE DÉPLACER · ESPACE SAUTE · SOURIS VISER · X ATTAQUER · P PARAMÈTRES · T DISCUSSION · CLIC GAUCHE MINER · CLIC DROIT POSER</p>
 
       <section class="game-menu" id="game-menu" role="dialog" aria-modal="true" aria-labelledby="menu-title">
         <form class="menu-shell" id="menu-form" autocomplete="off">
@@ -966,6 +1101,7 @@
     </main>
 
     <script src="src/net.js"></script>
+    <script src="src/projectile-physics.js"></script>
     <script src="src/characters.js"></script>
     <script src="src/sfx-library.js"></script>
     <script src="src/audio.js"></script>

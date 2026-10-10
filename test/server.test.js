@@ -42,7 +42,10 @@ async function until(client, predicate) {
   await until(a, (m) => m.t === "join" && m.player.name === "Bob");
   await until(b, (m) => m.t === "join" && m.player.name === "Alice");
   // Beyond the old 2600 px clamp: full world, attack counter, health and KO.
-  a.socket.send(JSON.stringify({ t: "state", x: 7000, gap: -30, f: -1, n: 3, a: 0.5, hp: 0, d: true }));
+  a.socket.send(JSON.stringify({
+    t: "state", x: 7000, gap: -30, f: -1, n: 3, a: 0.5, hp: 0, d: true,
+    projectile: { speed: 99999, gravity: -50, gravityDelay: 9, life: 100, scale: 9 },
+  }));
   const snapshot = await until(b, (m) => m.t === "snapshot" && m.p.some((p) => p.id === aw.id && p.n === 3));
   const remote = snapshot.p.find((p) => p.id === aw.id);
   assert.equal(remote.x, 7000);
@@ -50,6 +53,9 @@ async function until(client, predicate) {
   assert.equal(remote.hp, 0);
   assert.equal(remote.d, true);
   assert.equal(remote.a, 0.5);
+  assert.deepEqual(remote.projectile, {
+    speed: 1400, gravity: 0, gravityDelay: 1.5, life: 4, scale: 1.75,
+  }, "La physique réglée est partagée après validation des bornes côté serveur");
 
   a.socket.send(JSON.stringify({ t: "mineBlock", column: 12, row: 0, serial: 1 }));
   const minedByA = await until(a, (m) => m.t === "mineBlock" && m.dropId === aw.id + ":1");

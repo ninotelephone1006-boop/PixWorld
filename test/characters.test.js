@@ -5,9 +5,11 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
+const physicsSource = fs.readFileSync(path.join(__dirname, "..", "src", "projectile-physics.js"), "utf8");
 const source = fs.readFileSync(path.join(__dirname, "..", "src", "characters.js"), "utf8");
 const sandbox = { window: {} };
 vm.createContext(sandbox);
+vm.runInContext(physicsSource, sandbox);
 vm.runInContext(source, sandbox);
 
 const catalog = sandbox.window.PixWorldCharacters;
@@ -42,6 +44,9 @@ for (const character of catalog.list) {
       assert(typeof character[field] === "number" && character[field] >= 0, field + " défini pour " + character.id);
     }
     assert(character.projectileDelay < character.attackDuration, "Le projectile part pendant le geste d'attaque de " + character.id);
+    for (const field of ["projectileGravity", "projectileGravityDelay", "projectileScale"]) {
+      assert(typeof character[field] === "number" && character[field] >= 0, field + " défini pour " + character.id);
+    }
   }
   assert(typeof character.hitSound === "string" && character.hitSound, "Son d'impact défini pour " + character.id);
   assert(typeof character.attackSound === "string" && character.attackSound, "Son d'attaque défini pour " + character.id);
@@ -49,6 +54,16 @@ for (const character of catalog.list) {
   assert(catalog.isValid(character.id), "ID de personnage accepté : " + character.id);
   console.log("  ok   " + character.name + " · " + character.attackName + " · spritesheet 256×128 valide");
 }
+
+assert(catalog.get("archer").projectileGravity > catalog.get("ninja").projectileGravity,
+  "La flèche de Sora retombe plus fort que le shuriken de Kage");
+assert(catalog.get("mage").projectileGravity < catalog.get("ninja").projectileGravity,
+  "L'orbe de Yume garde une trajectoire plus flottante");
+const physics = sandbox.window.PixWorldProjectilePhysics;
+assert.strictEqual(physics.normalize("archer", { speed: 9999 }).speed, physics.RANGES.speed.max,
+  "La vitesse de projectile est bornée avant d'être partagée");
+assert.strictEqual(physics.normalize("ninja", { gravity: -50 }).gravity, physics.RANGES.gravity.min,
+  "La gravité est bornée à zéro au minimum");
 
 // Chaque héros a maintenant sa propre feuille : Sora et Raiden ne partagent
 // plus le corps du ninja, et aucune teinte n'est appliquée aux sprites.

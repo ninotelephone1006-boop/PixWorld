@@ -5,8 +5,8 @@ const assert = require("node:assert/strict");
 const { createBrowser, StubEvent } = require("./game-boot.test.js");
 const browsers = [];
 
-function createGame() {
-  const browser = createBrowser();
+function createGame(character = "ninja") {
+  const browser = createBrowser({ storage: { "pixworld.character": character } });
   browsers.push(browser);
   assert.equal(browser.load(), null);
   const socket = browser.sockets[0];
@@ -183,7 +183,53 @@ try {
   assert.ok(ahead.every((shot) => shot.dirX === -1 && shot.dirY === 0),
     "sans visée à la souris, il file droit devant le personnage");
 
-  console.log("input.test.js : regard vers le curseur, marche inverse, caméra, pause, HUD, toucher et attaques : ok");
+  // Paramètres par héros : réglages persistants, aperçu activable et gravité
+  // réellement appliquée au projectile de l'archère après son délai.
+  const settingsGame = createGame("archer");
+  const settingsDocument = settingsGame.browser.document;
+  const settingsToggle = settingsDocument.querySelector("#settings-toggle");
+  settingsToggle.dispatchEvent(new StubEvent("click", { bubbles: true }));
+  assert.equal(settingsGame.dbg.settingsOpen, true, "Le nouveau bouton ouvre les paramètres");
+  assert.equal(settingsDocument.querySelector("#projectile-settings").hidden, false);
+  const settingsTabs = settingsDocument.querySelector("#settings-character-tabs").querySelectorAll(".settings-character-tab");
+  const tab = (id) => settingsTabs.find((button) => button.dataset.character === id);
+  tab("samurai").dispatchEvent(new StubEvent("click", { bubbles: true }));
+  assert.equal(settingsDocument.querySelector("#settings-projectile-controls").hidden, true,
+    "Les commandes de projectile sont masquées pour la coupe de Raiden");
+  assert.equal(settingsDocument.querySelector("#settings-melee-note").hidden, false);
+  tab("archer").dispatchEvent(new StubEvent("click", { bubbles: true }));
+
+  const gravitySetting = settingsDocument.querySelector("#settings-projectile-gravity");
+  gravitySetting.value = "1600";
+  gravitySetting.dispatchEvent(new StubEvent("input", { bubbles: true }));
+  const trajectoryToggle = settingsDocument.querySelector("#settings-trajectory-preview");
+  trajectoryToggle.checked = true;
+  trajectoryToggle.dispatchEvent(new StubEvent("change", { bubbles: true }));
+  assert.equal(settingsGame.dbg.projectileSettings.projectiles.archer.gravity, 1600,
+    "La gravité est personnalisable par personnage");
+  assert.equal(settingsGame.dbg.projectileSettings.trajectoryPreview, true,
+    "L'aperçu de trajectoire peut être activé");
+  assert.ok(settingsGame.browser.sandbox.localStorage.getItem("pixworld.projectile-settings"),
+    "Les paramètres sont conservés dans le navigateur");
+  settingsGame.fire("keydown", { code: "KeyX", key: "x", repeat: false });
+  assert.equal(settingsGame.dbg.projectiles().length, 0, "Le panneau de réglages neutralise les attaques");
+  settingsGame.fire("keydown", { code: "Escape", key: "Escape", repeat: false });
+  assert.equal(settingsGame.dbg.settingsOpen, false, "Échap ferme les paramètres sans ouvrir le menu pause");
+  settingsGame.browser.runFrames(1);
+  assert.ok(settingsGame.browser.document.querySelector("#world").getContext("2d")._trajectoryDashCalls > 0,
+    "L'aperçu actif dessine bien une ligne en pointillés avant le lancement");
+
+  const archerOrigin = shotOrigin(settingsGame);
+  pointAt(settingsGame, archerOrigin.x + 420, archerOrigin.y);
+  settingsGame.fire("keydown", { code: "KeyX", key: "x", repeat: false });
+  settingsGame.fire("keyup", { code: "KeyX", key: "x" });
+  const archerFlight = collectShots(settingsGame, 42);
+  const archerShot = archerFlight.find((shot) => shot.gravity === 1600);
+  assert.ok(archerShot, "Le tir utilise les paramètres enregistrés pour l'archère");
+  assert.ok(archerFlight.some((shot) => shot.age > 0.32 && shot.dirY > 0.1),
+    "Après le délai, la gravité courbe la flèche vers le bas");
+
+  console.log("input.test.js : visée, paramètres, trajectoire, gravité et attaques : ok");
 } finally {
   browsers.forEach((browser) => browser.dispose());
 }

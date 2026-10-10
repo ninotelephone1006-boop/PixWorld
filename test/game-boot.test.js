@@ -237,6 +237,10 @@ function createContext(canvas) {
   const gradient = { addColorStop() {} };
   const base = {
     canvas,
+    _trajectoryDashCalls: 0,
+    setLineDash(pattern) {
+      if (canvas && canvas.getAttribute("id") === "world" && pattern && pattern.length) this._trajectoryDashCalls++;
+    },
     createLinearGradient: () => gradient,
     createRadialGradient: () => gradient,
     createPattern: () => ({}),
@@ -310,6 +314,31 @@ function buildDocument() {
       element("button", { class: "hotbar-slot", "data-slot": "2", "data-block": "stone" }),
     ]),
   ]);
+  const projectileSettings = element("section", { id: "projectile-settings", hidden: "" }, [
+    element("button", { id: "settings-close" }),
+    element("button", { id: "settings-done" }),
+    element("button", { id: "settings-reset" }),
+    element("nav", { id: "settings-character-tabs" }),
+    element("span", { id: "settings-character-icon" }),
+    element("h3", { id: "settings-character-name" }),
+    element("p", { id: "settings-character-description" }),
+    element("section", { id: "settings-projectile-controls" }),
+    element("p", { id: "settings-melee-note", hidden: "" }),
+    element("input", { id: "settings-projectile-speed", type: "range", value: "590" }),
+    element("output", { id: "settings-projectile-speed-value" }),
+    element("input", { id: "settings-projectile-gravity", type: "range", value: "300" }),
+    element("output", { id: "settings-projectile-gravity-value" }),
+    element("input", { id: "settings-projectile-delay", type: "range", value: "0.2" }),
+    element("output", { id: "settings-projectile-delay-value" }),
+    element("input", { id: "settings-projectile-life", type: "range", value: "1.6" }),
+    element("output", { id: "settings-projectile-life-value" }),
+    element("input", { id: "settings-projectile-scale", type: "range", value: "1" }),
+    element("output", { id: "settings-projectile-scale-value" }),
+    element("input", { id: "settings-trajectory-preview", type: "checkbox" }),
+    element("input", { id: "settings-projectile-trails", type: "checkbox" }),
+    element("input", { id: "settings-preview-duration", type: "range", value: "2" }),
+    element("output", { id: "settings-preview-duration-value" }),
+  ]);
   const chat = element("section", { id: "chat", class: "chat", hidden: "" }, [
     element("ul", { id: "chat-log", class: "chat-log" }),
     element("form", { id: "chat-form", class: "chat-form" }, [
@@ -348,11 +377,15 @@ function buildDocument() {
 
   body.append(element("main", { class: "game" }, [
     canvas,
-    element("section", { class: "hud" }, [element("button", { id: "sound-toggle" })]),
+    element("section", { class: "hud" }, [
+      element("button", { id: "sound-toggle" }),
+      element("button", { id: "settings-toggle" }),
+    ]),
     players,
     element("div", { id: "toasts", class: "toasts" }),
     chat,
     hotbar,
+    projectileSettings,
     menu,
   ]));
 
