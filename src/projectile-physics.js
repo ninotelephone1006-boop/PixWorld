@@ -1,4 +1,17 @@
-/* Réglages de physique partagés entre le navigateur et le serveur WebSocket. */
+/*
+ * Physique des projectiles : les valeurs choisies par le jeu.
+ *
+ * Ces réglages sont volontairement figés : aucun joueur ne peut changer la
+ * vitesse, la gravité, la portée ou la taille d'un tir. Le panneau ⚙ du jeu
+ * n'offre que l'affichage de l'aperçu du tir, purement local. Le projectile
+ * part donc toujours de la même façon chez tout le monde et le serveur n'a
+ * aucune physique à valider : il ne reçoit plus ces valeurs.
+ *
+ * Chaque héros garde néanmoins son tir d'origine (la flèche de Sora retombe
+ * plus franchement que le shuriken de Kage) : c'est une différence de design,
+ * pas un réglage personnel. src/characters.js recopie ces valeurs dans la
+ * feuille de chaque héros, et c'est cette feuille que le jeu applique.
+ */
 (function (root, factory) {
   "use strict";
   const api = factory();
@@ -13,26 +26,10 @@
     mage: Object.freeze({ speed: 430, gravity: 100, gravityDelay: 0.1, life: 2.7, scale: 1.1 }),
   });
 
-  const RANGES = Object.freeze({
-    speed: Object.freeze({ min: 180, max: 1400 }),
-    gravity: Object.freeze({ min: 0, max: 2200 }),
-    gravityDelay: Object.freeze({ min: 0, max: 1.5 }),
-    life: Object.freeze({ min: 0.4, max: 4 }),
-    scale: Object.freeze({ min: 0.5, max: 1.75 }),
-  });
-
-  function normalize(characterId, raw) {
-    const base = DEFAULTS[characterId] || DEFAULTS.ninja;
-    const values = raw && typeof raw === "object" ? raw : {};
-    const result = {};
-    Object.keys(RANGES).forEach((key) => {
-      const range = RANGES[key];
-      const parsed = Number(values[key]);
-      const value = values[key] == null || !Number.isFinite(parsed) ? base[key] : parsed;
-      result[key] = Math.min(range.max, Math.max(range.min, value));
-    });
-    return Object.freeze(result);
+  /** Le tir fixé par le jeu pour un héros (le ninja sert de repli). */
+  function forCharacter(characterId) {
+    return DEFAULTS[characterId] || DEFAULTS.ninja;
   }
 
-  return Object.freeze({ DEFAULTS, RANGES, normalize });
+  return Object.freeze({ DEFAULTS, forCharacter });
 });

@@ -53,9 +53,13 @@ async function until(client, predicate) {
   assert.equal(remote.hp, 0);
   assert.equal(remote.d, true);
   assert.equal(remote.a, 0.5);
-  assert.deepEqual(remote.projectile, {
-    speed: 1400, gravity: 0, gravityDelay: 1.5, life: 4, scale: 1.75,
-  }, "La physique réglée est partagée après validation des bornes côté serveur");
+  // La physique des tirs n'est plus négociée : un client qui envoie un objet
+  // « projectile » n'est pas relayé, le jeu impose ses valeurs à tout le monde.
+  assert.equal(remote.projectile, undefined,
+    "La physique envoyée par un client est ignorée par le serveur");
+  assert.deepEqual(Object.keys(remote).sort(), [
+    "a", "c", "character", "cx", "cy", "d", "f", "g", "gap", "hp", "id", "name", "n", "vx", "vy", "x",
+  ].sort(), "Seuls les champs connus du joueur sont relayés");
 
   a.socket.send(JSON.stringify({ t: "mineBlock", column: 12, row: 0, serial: 1 }));
   const minedByA = await until(a, (m) => m.t === "mineBlock" && m.dropId === aw.id + ":1");

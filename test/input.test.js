@@ -5,8 +5,8 @@ const assert = require("node:assert/strict");
 const { createBrowser, StubEvent } = require("./game-boot.test.js");
 const browsers = [];
 
-function createGame(character = "ninja") {
-  const browser = createBrowser({ storage: { "pixworld.character": character } });
+function createGame(character = "ninja", extraStorage = {}) {
+  const browser = createBrowser({ storage: { "pixworld.character": character, ...extraStorage } });
   browsers.push(browser);
   assert.equal(browser.load(), null);
   const socket = browser.sockets[0];
@@ -183,34 +183,45 @@ try {
   assert.ok(ahead.every((shot) => shot.dirX === -1 && shot.dirY === 0),
     "sans visée à la souris, il file droit devant le personnage");
 
-  // Paramètres par héros : réglages persistants, aperçu activable et gravité
-  // réellement appliquée au projectile de l'archère après son délai.
+  // Panneau d'affichage : la physique des tirs est fixée par le jeu, seul
+  // l'aperçu du tir se choisit — et il ne change rien au vol du projectile.
   const settingsGame = createGame("archer");
   const settingsDocument = settingsGame.browser.document;
   const settingsToggle = settingsDocument.querySelector("#settings-toggle");
   settingsToggle.dispatchEvent(new StubEvent("click", { bubbles: true }));
-  assert.equal(settingsGame.dbg.settingsOpen, true, "Le nouveau bouton ouvre les paramètres");
+  assert.equal(settingsGame.dbg.settingsOpen, true, "Le bouton ⚙ du HUD ouvre les paramètres");
   assert.equal(settingsDocument.querySelector("#projectile-settings").hidden, false);
-  const settingsTabs = settingsDocument.querySelector("#settings-character-tabs").querySelectorAll(".settings-character-tab");
-  const tab = (id) => settingsTabs.find((button) => button.dataset.character === id);
-  tab("samurai").dispatchEvent(new StubEvent("click", { bubbles: true }));
-  assert.equal(settingsDocument.querySelector("#settings-projectile-controls").hidden, true,
-    "Les commandes de projectile sont masquées pour la coupe de Raiden");
-  assert.equal(settingsDocument.querySelector("#settings-melee-note").hidden, false);
-  tab("archer").dispatchEvent(new StubEvent("click", { bubbles: true }));
 
-  const gravitySetting = settingsDocument.querySelector("#settings-projectile-gravity");
-  gravitySetting.value = "1600";
-  gravitySetting.dispatchEvent(new StubEvent("input", { bubbles: true }));
+  assert.deepEqual({ ...settingsGame.dbg.lockedProjectile },
+    { speed: 820, gravity: 760, gravityDelay: 0.28, life: 2.2, scale: 0.9 },
+    "L'archère garde le tir fixé par le jeu, même panneau ouvert");
+  assert.equal(settingsDocument.querySelector("#settings-locked-gravity").textContent, "760 px/s²",
+    "Le panneau affiche les valeurs du jeu, en lecture seule");
+  assert.equal(settingsDocument.querySelector("#settings-locked-hero").textContent, "Sora · Flèche de vent",
+    "Le récapitulatif suit le héros du joueur");
+
   const trajectoryToggle = settingsDocument.querySelector("#settings-trajectory-preview");
   trajectoryToggle.checked = true;
   trajectoryToggle.dispatchEvent(new StubEvent("change", { bubbles: true }));
-  assert.equal(settingsGame.dbg.projectileSettings.projectiles.archer.gravity, 1600,
-    "La gravité est personnalisable par personnage");
-  assert.equal(settingsGame.dbg.projectileSettings.trajectoryPreview, true,
+  assert.equal(settingsGame.dbg.displaySettings.trajectoryPreview, true,
     "L'aperçu de trajectoire peut être activé");
-  assert.ok(settingsGame.browser.sandbox.localStorage.getItem("pixworld.projectile-settings"),
-    "Les paramètres sont conservés dans le navigateur");
+  const trailsToggle = settingsDocument.querySelector("#settings-projectile-trails");
+  trailsToggle.checked = false;
+  trailsToggle.dispatchEvent(new StubEvent("change", { bubbles: true }));
+  assert.equal(settingsGame.dbg.displaySettings.showTrails, false,
+    "Les traînées peuvent être masquées");
+  const previewLength = settingsDocument.querySelector("#settings-preview-duration");
+  previewLength.value = "0.5";
+  previewLength.dispatchEvent(new StubEvent("input", { bubbles: true }));
+  assert.equal(settingsGame.dbg.displaySettings.previewDuration, 0.5,
+    "La longueur de l'aperçu se règle");
+  previewLength.value = "99";
+  previewLength.dispatchEvent(new StubEvent("input", { bubbles: true }));
+  assert.equal(settingsGame.dbg.displaySettings.previewDuration, 4,
+    "La longueur de l'aperçu reste bornée, sans jamais toucher au tir");
+  assert.ok(settingsGame.browser.sandbox.localStorage.getItem("pixworld.display-settings"),
+    "Les préférences d'affichage sont conservées dans le navigateur");
+
   settingsGame.fire("keydown", { code: "KeyX", key: "x", repeat: false });
   assert.equal(settingsGame.dbg.projectiles().length, 0, "Le panneau de réglages neutralise les attaques");
   settingsGame.fire("keydown", { code: "Escape", key: "Escape", repeat: false });
@@ -224,12 +235,57 @@ try {
   settingsGame.fire("keydown", { code: "KeyX", key: "x", repeat: false });
   settingsGame.fire("keyup", { code: "KeyX", key: "x" });
   const archerFlight = collectShots(settingsGame, 42);
-  const archerShot = archerFlight.find((shot) => shot.gravity === 1600);
-  assert.ok(archerShot, "Le tir utilise les paramètres enregistrés pour l'archère");
+  assert.ok(archerFlight.length > 0, "L'archère tire bien");
+  assert.equal(archerFlight[0].gravity, 760,
+    "Le tir suit la gravité du jeu : aucun réglage personnel n'est mélangé");
   assert.ok(archerFlight.some((shot) => shot.age > 0.32 && shot.dirY > 0.1),
     "Après le délai, la gravité courbe la flèche vers le bas");
 
-  console.log("input.test.js : visée, paramètres, trajectoire, gravité et attaques : ok");
+  // Les réglages de tir enregistrés par d'anciennes versions du jeu sont
+  // jetés sans être lus : ils ne peuvent plus fausser une partie.
+  const legacyGame = createGame("archer", {
+    "pixworld.projectile-settings": JSON.stringify({
+      projectiles: { archer: { gravity: 9999, speed: 4000, scale: 9 } },
+      trajectoryPreview: true,
+    }),
+  });
+  assert.equal(legacyGame.browser.sandbox.localStorage.getItem("pixworld.projectile-settings"), null,
+    "L'ancienne clé de réglages est supprimée au chargement");
+  assert.deepEqual({ ...legacyGame.dbg.lockedProjectile },
+    { speed: 820, gravity: 760, gravityDelay: 0.28, life: 2.2, scale: 0.9 },
+    "Un gravité héritée de 9999 n'a aucun effet sur le tir");
+  assert.equal(legacyGame.dbg.displaySettings.trajectoryPreview, false,
+    "Une préférence de tir héritée n'active plus rien : seul l'affichage se recharge");
+  legacyGame.fire("keydown", { code: "KeyX", key: "x", repeat: false });
+  legacyGame.fire("keyup", { code: "KeyX", key: "x" });
+  const legacyFlight = collectShots(legacyGame, 20);
+  assert.ok(legacyFlight.length === 0 || legacyFlight.every((shot) => shot.gravity === 760 && shot.speed === 820),
+    "Le projectile d'une ancienne partie réglée redevient normal");
+
+  // Un pair qui enverrait une physique inventée n'est pas écouté : son tir
+  // est rejoué chez nous avec les valeurs fixées par le jeu.
+  const spoofGame = createGame("ninja");
+  spoofGame.socket.receive({
+    t: "snapshot",
+    p: [{
+      id: "p9", name: "Tricheur", character: "ninja", x: 300, gap: 0, f: 1, vx: 0, vy: 0,
+      g: true, a: 1, n: 1, c: "ninja", hp: 100, d: false,
+      projectile: { speed: 4000, gravity: 0, gravityDelay: 0, life: 9, scale: 1.75 },
+    }],
+  });
+  const peerShots = [];
+  for (let frame = 0; frame < 30; frame++) {
+    spoofGame.browser.runFrames(1);
+    spoofGame.dbg.projectiles()
+      .filter((shot) => shot.owner === "p9")
+      .forEach((shot) => peerShots.push(shot));
+  }
+  assert.ok(peerShots.length > 0, "le tir du pair est bien rejoué chez nous");
+  assert.ok(peerShots.every((shot) => shot.speed === 590 && shot.gravity === 300 && shot.scale === 1),
+    "la physique annoncée par le pair est ignorée : " + JSON.stringify(peerShots[0]));
+  assert.ok(spoofGame.dbg.peers().some((peer) => peer.id === "p9"), "le pair reste dans la partie");
+
+  console.log("input.test.js : visée, aperçu du tir, trajectoire, gravité et attaques : ok");
 } finally {
   browsers.forEach((browser) => browser.dispose());
 }

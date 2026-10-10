@@ -314,26 +314,19 @@ function buildDocument() {
       element("button", { class: "hotbar-slot", "data-slot": "2", "data-block": "stone" }),
     ]),
   ]);
+  // Panneau d'affichage : la physique des tirs y est seulement affichée.
   const projectileSettings = element("section", { id: "projectile-settings", hidden: "" }, [
     element("button", { id: "settings-close" }),
     element("button", { id: "settings-done" }),
-    element("button", { id: "settings-reset" }),
-    element("nav", { id: "settings-character-tabs" }),
-    element("span", { id: "settings-character-icon" }),
-    element("h3", { id: "settings-character-name" }),
-    element("p", { id: "settings-character-description" }),
-    element("section", { id: "settings-projectile-controls" }),
+    element("section", { id: "settings-projectile-locked" }, [
+      element("span", { id: "settings-locked-hero" }, ["Kage · Shuriken"]),
+      element("dd", { id: "settings-locked-speed" }),
+      element("dd", { id: "settings-locked-gravity" }),
+      element("dd", { id: "settings-locked-delay" }),
+      element("dd", { id: "settings-locked-life" }),
+      element("dd", { id: "settings-locked-scale" }),
+    ]),
     element("p", { id: "settings-melee-note", hidden: "" }),
-    element("input", { id: "settings-projectile-speed", type: "range", value: "590" }),
-    element("output", { id: "settings-projectile-speed-value" }),
-    element("input", { id: "settings-projectile-gravity", type: "range", value: "300" }),
-    element("output", { id: "settings-projectile-gravity-value" }),
-    element("input", { id: "settings-projectile-delay", type: "range", value: "0.2" }),
-    element("output", { id: "settings-projectile-delay-value" }),
-    element("input", { id: "settings-projectile-life", type: "range", value: "1.6" }),
-    element("output", { id: "settings-projectile-life-value" }),
-    element("input", { id: "settings-projectile-scale", type: "range", value: "1" }),
-    element("output", { id: "settings-projectile-scale-value" }),
     element("input", { id: "settings-trajectory-preview", type: "checkbox" }),
     element("input", { id: "settings-projectile-trails", type: "checkbox" }),
     element("input", { id: "settings-preview-duration", type: "range", value: "2" }),
@@ -576,6 +569,27 @@ function testMarkupStaysInSync() {
     check("la classe ." + name + " existe dans index.html ou est créée par un script", inMarkup || createdByScript);
   });
   check("le texte d'attente du menu est présent", PLACEHOLDER_STATUS.length > 0, PLACEHOLDER_STATUS);
+
+  // La physique des tirs est fixée par le jeu : le panneau du HUD ne doit
+  // proposer aucun champ pour la changer, seulement l'affichage de l'aperçu.
+  const settingsBlock = HTML.slice(
+    HTML.indexOf('<section class="projectile-settings-overlay"'),
+    HTML.indexOf('<p class="hint">'),
+  );
+  const tuningFields = ["settings-projectile-speed", "settings-projectile-gravity", "settings-projectile-delay",
+    "settings-projectile-life", "settings-projectile-scale", "settings-projectile-speed-value",
+    "settings-character-tabs", "settings-reset"]
+    .filter((id) => new RegExp('id="' + id + '"').test(HTML));
+  check("aucun champ de réglage de tir dans index.html", tuningFields.length === 0, tuningFields.join(", "));
+  const rangeInputs = [...settingsBlock.matchAll(/<input[^>]*type="range"[^>]*>/g)].map((m) => m[0]);
+  check("le seul curseur du panneau règle la longueur de l'aperçu",
+    rangeInputs.length === 1 && rangeInputs[0].includes("settings-preview-duration"),
+    rangeInputs.join("\n"));
+  check("l'aperçu du tir reste activable", /id="settings-trajectory-preview" type="checkbox"/.test(settingsBlock));
+  check("le récapitulatif du tir est en lecture seule", /id="settings-locked-speed"/.test(settingsBlock));
+  // Ni le réseau ni le navigateur ne peuvent injecter une physique de tir.
+  check("le jeu ne lit aucune physique envoyée par un joueur ou le serveur",
+    !/\b(?:message|data|state|peer|saved)\.projectile\b/.test(sources));
 }
 
 /** Le scénario qui a déjà cassé : plus aucun héros affiché, statut figé. */

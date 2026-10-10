@@ -905,63 +905,32 @@
         <div class="projectile-settings-panel">
           <header class="projectile-settings-header">
             <div>
-              <p class="settings-kicker">ATELIER DE TIR · RÉGLAGES PERSONNELS</p>
-              <h2 id="projectile-settings-title">Paramètres des projectiles</h2>
-              <p class="settings-intro">Chaque héros garde sa propre physique. Tes réglages sont sauvegardés sur cet appareil et partagés avec l’arène.</p>
+              <p class="settings-kicker">AFFICHAGE EN JEU · RÉGLAGES PERSONNELS</p>
+              <h2 id="projectile-settings-title">Aperçu du tir</h2>
+              <p class="settings-intro">La physique des projectiles est fixée par le jeu : personne ne règle la vitesse, la gravité, la taille ou la portée d’un tir. Tu choisis seulement si l’arc prévu est tracé chez toi.</p>
             </div>
             <button class="settings-close" id="settings-close" type="button" title="Fermer les paramètres" aria-label="Fermer les paramètres">×</button>
           </header>
 
-          <nav class="settings-character-tabs" id="settings-character-tabs" role="tablist" aria-label="Choisir le personnage à régler"></nav>
-
-          <div class="settings-character-summary">
-            <span class="settings-character-icon" id="settings-character-icon" aria-hidden="true">✦</span>
-            <div>
-              <h3 id="settings-character-name">Kage · Shuriken</h3>
-              <p id="settings-character-description">Étoile tournoyante · tir rapide</p>
-            </div>
-            <button class="settings-reset" id="settings-reset" type="button">Réinitialiser ce héros</button>
-          </div>
-
           <div class="projectile-settings-content">
-            <section class="settings-projectile-controls" id="settings-projectile-controls" aria-label="Physique du projectile">
+            <section class="settings-projectile-locked" id="settings-projectile-locked" aria-labelledby="settings-locked-title">
               <div class="settings-section-heading">
                 <div>
-                  <h3>Physique du tir</h3>
-                  <p>La gravité courbe la trajectoire après le délai choisi.</p>
+                  <h3 id="settings-locked-title">Le tir de <span id="settings-locked-hero">Kage · Shuriken</span></h3>
+                  <p>À consulter, pas à modifier : les mêmes valeurs pour tous les joueurs.</p>
                 </div>
-                <span class="settings-section-tag">PIXELS · SECONDE</span>
+                <span class="settings-section-tag">FIXÉ PAR LE JEU</span>
               </div>
-              <div class="settings-control-grid">
-                <label class="settings-range" for="settings-projectile-speed">
-                  <span class="settings-range-heading"><span>Vitesse au lancement</span><output id="settings-projectile-speed-value" for="settings-projectile-speed">590 px/s</output></span>
-                  <input id="settings-projectile-speed" type="range" min="180" max="1400" step="10" value="590" />
-                  <span class="settings-range-hint">Rapidité initiale du projectile</span>
-                </label>
-                <label class="settings-range" for="settings-projectile-gravity">
-                  <span class="settings-range-heading"><span>Force de gravité</span><output id="settings-projectile-gravity-value" for="settings-projectile-gravity">300 px/s²</output></span>
-                  <input id="settings-projectile-gravity" type="range" min="0" max="2200" step="20" value="300" />
-                  <span class="settings-range-hint">À 0, le tir ne tombe pas</span>
-                </label>
-                <label class="settings-range" for="settings-projectile-delay">
-                  <span class="settings-range-heading"><span>Début de la chute</span><output id="settings-projectile-delay-value" for="settings-projectile-delay">0,20 s</output></span>
-                  <input id="settings-projectile-delay" type="range" min="0" max="1.5" step="0.05" value="0.2" />
-                  <span class="settings-range-hint">Temps avant que la gravité agisse</span>
-                </label>
-                <label class="settings-range" for="settings-projectile-life">
-                  <span class="settings-range-heading"><span>Durée maximale du vol</span><output id="settings-projectile-life-value" for="settings-projectile-life">1,6 s</output></span>
-                  <input id="settings-projectile-life" type="range" min="0.4" max="4" step="0.1" value="1.6" />
-                  <span class="settings-range-hint">Le tir disparaît à la fin du temps</span>
-                </label>
-                <label class="settings-range" for="settings-projectile-scale">
-                  <span class="settings-range-heading"><span>Taille du projectile</span><output id="settings-projectile-scale-value" for="settings-projectile-scale">100 %</output></span>
-                  <input id="settings-projectile-scale" type="range" min="0.5" max="1.75" step="0.05" value="1" />
-                  <span class="settings-range-hint">La zone de collision suit la taille</span>
-                </label>
-              </div>
+              <dl class="settings-locked-grid">
+                <div class="settings-locked-item"><dt>Vitesse au lancement</dt><dd id="settings-locked-speed">590 px/s</dd></div>
+                <div class="settings-locked-item"><dt>Force de gravité</dt><dd id="settings-locked-gravity">300 px/s²</dd></div>
+                <div class="settings-locked-item"><dt>Début de la chute</dt><dd id="settings-locked-delay">0,20 s</dd></div>
+                <div class="settings-locked-item"><dt>Durée maximale du vol</dt><dd id="settings-locked-life">1,6 s</dd></div>
+                <div class="settings-locked-item"><dt>Taille et zone de collision</dt><dd id="settings-locked-scale">100 %</dd></div>
+              </dl>
             </section>
 
-            <p class="settings-melee-note" id="settings-melee-note" hidden>Raiden combat au corps-à-corps : il n’a pas de projectile à régler.</p>
+            <p class="settings-melee-note" id="settings-melee-note" hidden>Raiden combat au corps-à-corps : il n’a pas de projectile à afficher.</p>
 
             <section class="settings-display-controls" aria-labelledby="settings-display-title">
               <div class="settings-section-heading">
@@ -990,7 +959,7 @@
             </section>
           </div>
           <footer class="settings-footer">
-            <span>Les collisions avec le terrain restent actives.</span>
+            <span>Rien ne change au combat : seuls l’aperçu et les effets s’affichent ou se masquent.</span>
             <button class="settings-done" id="settings-done" type="button">Terminé <span aria-hidden="true">✓</span></button>
           </footer>
         </div>
