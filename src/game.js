@@ -5,8 +5,8 @@
  * Les quatre combattants ont leur propre feuille de sprite et leur attaque ;
  * Échap rouvre le menu en pause pendant la partie.
  *
- * Caméra : les flèches regardent au sud, à l'est, au nord ou à l'ouest, avec
- * une rotation fluide. Les blocs au-dessus du joueur s'estompent sous terre.
+ * Caméra : seule la vue de base (face sud) est active. Les blocs au-dessus
+ * du joueur s'estompent sous terre.
  *
  * Combat : chaque joueur porte une barre de vie. Les attaques des autres
  * (projectiles et coups de mêlée) nous enlèvent des points, nous repoussent
@@ -194,7 +194,7 @@
   // colonnes avec cette même constante, donc le client doit suivre.
   const BLOCK_SIZE = window.PixWorldMining.constants.BLOCK_SIZE;
   const mining = window.PixWorldMining.create({ worldWidth: WORLD_WIDTH, blockSize: BLOCK_SIZE });
-  // Caméra 2,5D : 4 azimuts (flèches), cubes 3/4, occultation sous terre.
+  // Caméra 2,5D : vue de base (cubes 3/4) et occultation sous terre.
   const look = window.PixWorldCamera.create();
   // Textures de blocs sans couture (Kenney, CC0) : pour casser la répétition
   // sans créer de raccord visible, chaque bloc est dessiné avec l'une des
@@ -1622,12 +1622,13 @@
       keys.has("KeyQ") ||
       keys.has("KeyA") ||
       keys.has("q") ||
-      keys.has("a")
+      keys.has("a") ||
+      keys.has("ArrowLeft")
     );
   }
 
   function isRightPressed() {
-    return keys.has("KeyD") || keys.has("d");
+    return keys.has("KeyD") || keys.has("d") || keys.has("ArrowRight");
   }
 
   // ──────────────────────── Barre de vie / dégâts ────────────────────────
@@ -3389,43 +3390,6 @@
     }
   }
 
-  function drawCompass() {
-    const size = 34;
-    const x = width - size - 18;
-    const y = 18;
-    ctx.save();
-    ctx.globalAlpha = 0.92;
-    ctx.fillStyle = "rgba(16, 32, 48, 0.55)";
-    ctx.beginPath();
-    ctx.arc(x + size / 2, y + size / 2, size / 2 + 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.translate(x + size / 2, y + size / 2);
-    ctx.rotate(-look.yaw);
-    ctx.fillStyle = "#f4f0e4";
-    ctx.beginPath();
-    ctx.moveTo(0, -size * 0.38);
-    ctx.lineTo(5, 4);
-    ctx.lineTo(0, 1);
-    ctx.lineTo(-5, 4);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = "#d94a4a";
-    ctx.beginPath();
-    ctx.moveTo(0, -size * 0.38);
-    ctx.lineTo(3.5, -2);
-    ctx.lineTo(-3.5, -2);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-    ctx.save();
-    ctx.font = "bold 10px " + FONT_STACK;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    ctx.fillStyle = "rgba(255,255,255,0.88)";
-    ctx.fillText(look.facingName, x + size / 2, y + size + 6);
-    ctx.restore();
-  }
-
   function draw() {
     ctx.clearRect(0, 0, width, height);
 
@@ -3498,7 +3462,6 @@
 
     scenery.drawGrade(ctx, width, height, camX);
     fx.drawOverlay(ctx, width, height);
-    drawCompass();
   }
 
   function frame(time) {
@@ -3617,15 +3580,12 @@
       return;
     }
 
-    if (look.setFacingByArrow(event.code)) {
-      event.preventDefault();
-      return;
-    }
-
     const controlCode = [
       "KeyQ",
       "KeyA",
       "KeyD",
+      "ArrowLeft",
+      "ArrowRight",
       "Space",
       "KeyX",
     ].includes(event.code);

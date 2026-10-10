@@ -1,8 +1,8 @@
 "use strict";
 
 /**
- * Caméra en jeu : les flèches tournent la vue sans déplacer le personnage,
- * A/D continuent de marcher, et la projection sud reste l'identité.
+ * Caméra en jeu : seule la vue de base est conservée.
+ * Les flèches déplacent le personnage et la vue sud reste fixe.
  */
 const assert = require("node:assert/strict");
 const { createBrowser } = require("./game-boot.test.js");
@@ -32,33 +32,35 @@ function fire(type, props) {
 
 const startX = dbg.player.x;
 fire("keydown", { code: "ArrowRight", key: "ArrowRight", repeat: false });
-browser.runFrames(40);
+browser.runFrames(20);
 fire("keyup", { code: "ArrowRight", key: "ArrowRight" });
-assert.equal(dbg.player.x, startX, "La flèche droite ne marche plus : elle tourne la caméra");
-assert.equal(dbg.camera.facing, "east", "Flèche droite : on regarde l'est");
-assert.ok(dbg.camera.yaw > 0.8, "L'azimut a tourné en douceur vers π/2 (" + dbg.camera.yaw + ")");
-assert.equal(dbg.camera.identity, false);
+assert.ok(dbg.player.x > startX, "La flèche droite déplace le personnage vers la droite (" + dbg.player.x + ")");
+assert.equal(dbg.camera.facing, "south", "La caméra reste sur la vue de base");
+assert.equal(dbg.camera.yaw, 0);
+assert.equal(dbg.camera.identity, true);
+
+const beforeLeft = dbg.player.x;
+fire("keydown", { code: "ArrowLeft", key: "ArrowLeft", repeat: false });
+browser.runFrames(20);
+fire("keyup", { code: "ArrowLeft", key: "ArrowLeft" });
+assert.ok(dbg.player.x < beforeLeft, "La flèche gauche déplace le personnage vers la gauche (" + dbg.player.x + ")");
+assert.equal(dbg.camera.facing, "south");
 
 fire("keydown", { code: "ArrowUp", key: "ArrowUp", repeat: false });
-browser.runFrames(40);
+browser.runFrames(10);
 fire("keyup", { code: "ArrowUp", key: "ArrowUp" });
-assert.equal(dbg.camera.facing, "north");
-
-fire("keydown", { code: "ArrowLeft", key: "ArrowLeft", repeat: false });
-browser.runFrames(40);
-fire("keyup", { code: "ArrowLeft", key: "ArrowLeft" });
-assert.equal(dbg.camera.facing, "west");
+assert.equal(dbg.camera.facing, "south");
 
 fire("keydown", { code: "ArrowDown", key: "ArrowDown", repeat: false });
-browser.runFrames(40);
+browser.runFrames(10);
 fire("keyup", { code: "ArrowDown", key: "ArrowDown" });
 assert.equal(dbg.camera.facing, "south");
-assert.equal(dbg.camera.identity, true, "Flèche bas : retour à la vue sud, projection identité");
+assert.equal(dbg.camera.identity, true);
 
-const before = dbg.player.x;
+const beforeD = dbg.player.x;
 fire("keydown", { code: "KeyD", key: "d", repeat: false });
 browser.runFrames(12);
 fire("keyup", { code: "KeyD", key: "d" });
-assert.ok(dbg.player.x > before, "A/D déplacent toujours le personnage (" + dbg.player.x + ")");
+assert.ok(dbg.player.x > beforeD, "A/D déplacent toujours le personnage (" + dbg.player.x + ")");
 
-console.log("game-camera.test.js : flèches = caméra, A/D = marche, vue sud inchangée : ok");
+console.log("game-camera.test.js : vue de base conservée, flèches = marche, caméra fixe : ok");

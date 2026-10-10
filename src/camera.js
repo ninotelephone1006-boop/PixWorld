@@ -1,21 +1,18 @@
 /**
- * PixWorld — caméra 2,5D à 4 directions, façon RPG pixel art.
+ * PixWorld — vue 2,5D pixel art (vue de base / cubes 3/4).
  *
  * Le plan de jeu reste le monde 2D existant (z = 0) : minage, collisions,
- * sauts et visée ne changent pas. Les flèches visent l'un des quatre azimuts
- * (sud, est, nord, ouest) ; l'angle s'interpolé pour tourner en douceur.
+ * sauts et visée ne changent pas. Seule la vue de base (face sud, repère écran
+ * x - camX, y - camY) est conservée : les autres directions sont retirées.
  *
- * Projection oblique (cabinet 3/4) : la face avant d'un bloc, sur z = 0,
- * retombe exactement sur l'ancien repère écran (x - camX, y - camY) tant
- * que l'on regarde vers le sud. Les faces supérieure et latérale, ainsi
- * qu'une extrusion visuelle en z, donnent le relief « comme les anciens
- * Pokémon » sans déplacer les clics ni les collisions.
+ * Projection oblique (cabinet 3/4) : les faces supérieure et latérale des
+ * blocs donnent le relief « comme les anciens Pokémon » sans déplacer les
+ * clics ni les collisions.
  *
  * Quand le joueur creuse, les blocs situés au-dessus de lui s'estompent
  * puis récupèrent leur opacité dès qu'il s'éloigne.
  *
  *   const look = PixWorldCamera.create();
- *   look.setFacingByArrow("ArrowRight");
  *   look.update(delta);
  *   look.updateOcclusion({ column, row, underground }, delta);
  *   look.project(x, y, z, view);   // → { x, y, depth }
@@ -24,30 +21,22 @@ window.PixWorldCamera = (() => {
   "use strict";
 
   const TAU = Math.PI * 2;
-  const TURN_SPEED = 9.5; // rad/s : un quart de tour se pose en ~0,45 s
+  const TURN_SPEED = 9.5;
   const SNAP_ANGLE = 0.02;
-  // Contribution de la profondeur (z) à l'écran : 3/4 pixel art.
+  // Contribution de la profondeur (z) à l'écran : 3/4 pixel art en vue de base.
   const PITCH_K = 0.22;
   const OBLIQUE_K = 0.28;
-  // Extrusion visuelle nord-sud, uniquement hors vue sud (sinon identité).
-  const Z_EXTENT = 6;
+  const Z_EXTENT = 0;
   const OCCLUSION_RADIUS = 5;
   const OCCLUSION_FADE = 6.5; // vitesse de l'estompage / du retour
   const OCCLUSION_MIN = 0.16;
 
+  // Seule la vue de base (sud, repère identité) est conservée.
   const FACINGS = Object.freeze([
-    Object.freeze({ id: "south", name: "Sud", yaw: 0, arrow: "ArrowDown" }),
-    Object.freeze({ id: "east", name: "Est", yaw: Math.PI / 2, arrow: "ArrowRight" }),
-    Object.freeze({ id: "north", name: "Nord", yaw: Math.PI, arrow: "ArrowUp" }),
-    Object.freeze({ id: "west", name: "Ouest", yaw: -Math.PI / 2, arrow: "ArrowLeft" }),
+    Object.freeze({ id: "south", name: "Sud", yaw: 0 }),
   ]);
 
-  const ARROW_TO_FACING = Object.freeze({
-    ArrowDown: 0,
-    ArrowRight: 1,
-    ArrowUp: 2,
-    ArrowLeft: 3,
-  });
+  const ARROW_TO_FACING = Object.freeze({});
 
   function clamp(value, min, max) {
     return value < min ? min : value > max ? max : value;
@@ -67,8 +56,7 @@ window.PixWorldCamera = (() => {
   }
 
   function facingIndex(id) {
-    const index = FACINGS.findIndex((item) => item.id === id);
-    return index < 0 ? 0 : index;
+    return 0;
   }
 
   /**
@@ -106,23 +94,22 @@ window.PixWorldCamera = (() => {
     let underground = false;
 
     function currentFacing() {
-      return FACINGS[facing] || FACINGS[0];
+      return FACINGS[0];
     }
 
     function setFacing(index) {
-      const next = ((Number(index) || 0) % FACINGS.length + FACINGS.length) % FACINGS.length;
-      facing = next;
-      targetYaw = FACINGS[next].yaw;
+      facing = 0;
+      targetYaw = 0;
+      yaw = 0;
     }
 
     function setFacingById(id) {
-      setFacing(facingIndex(id));
+      setFacing(0);
     }
 
     function setFacingByArrow(code) {
-      if (!Object.prototype.hasOwnProperty.call(ARROW_TO_FACING, code)) return false;
-      setFacing(ARROW_TO_FACING[code]);
-      return true;
+      // Les autres vues sont retirées : les flèches ne tournent plus la caméra.
+      return false;
     }
 
     function reset() {
@@ -134,38 +121,27 @@ window.PixWorldCamera = (() => {
     }
 
     function update(delta) {
-      const dt = Math.max(0, Number(delta) || 0);
-      const k = 1 - Math.exp(-TURN_SPEED * dt);
-      yaw = lerpAngle(yaw, targetYaw, k);
-      if (Math.abs(normalizeAngle(yaw - targetYaw)) < SNAP_ANGLE) yaw = targetYaw;
+      yaw = 0;
     }
 
     function isIdentity() {
-      return Math.abs(normalizeAngle(yaw)) < SNAP_ANGLE;
+      return true;
     }
 
     /**
-     * Repère écran d'un point monde. z = 0 et yaw = 0 reproduisent
-     * exactement (x - camX, y - camY).
+     * Repère écran d'un point monde en vue de base.
+     * Pour z = 0, produit exactement (x - camX, y - camY).
      */
     function project(worldX, worldY, worldZ, view) {
       const camX = Number(view && view.camX) || 0;
       const camY = Number(view && view.camY) || 0;
-      const focusX = view && view.focusX != null ? Number(view.focusX) : camX;
-      const focusY = view && view.focusY != null ? Number(view.focusY) : camY;
       const x = Number(worldX) || 0;
       const y = Number(worldY) || 0;
       const z = Number(worldZ) || 0;
-      const c = Math.cos(yaw);
-      const s = Math.sin(yaw);
-      const relX = x - focusX;
-      const relY = y - focusY;
-      const alongRight = relX * c + z * s;
-      const alongFwd = -relX * s + z * c;
       return {
-        x: alongRight - alongFwd * OBLIQUE_K + (focusX - camX),
-        y: relY + alongFwd * PITCH_K + (focusY - camY),
-        depth: alongFwd,
+        x: x - camX - z * OBLIQUE_K,
+        y: y - camY + z * PITCH_K,
+        depth: z,
       };
     }
 
@@ -173,79 +149,24 @@ window.PixWorldCamera = (() => {
     function unproject(screenX, screenY, view) {
       const camX = Number(view && view.camX) || 0;
       const camY = Number(view && view.camY) || 0;
-      const focusX = view && view.focusX != null ? Number(view.focusX) : camX;
-      const focusY = view && view.focusY != null ? Number(view.focusY) : camY;
       const sx = Number(screenX) || 0;
       const sy = Number(screenY) || 0;
-      const c = Math.cos(yaw);
-      const s = Math.sin(yaw);
-      const originX = focusX - camX;
-      const originY = focusY - camY;
-      // sx = relX * c - alongFwd * OBLIQUE + originX, alongFwd = -relX * s
-      // sx = relX * c + relX * s * OBLIQUE + originX
-      const denom = c + s * OBLIQUE_K;
-      let relX;
-      if (Math.abs(denom) < 0.12) {
-        // Profil est/ouest : x devient de la profondeur, on le laisse au focus.
-        relX = 0;
-      } else {
-        relX = (sx - originX) / denom;
-      }
-      const alongFwd = -relX * s;
-      const relY = sy - originY - alongFwd * PITCH_K;
-      return { x: relX + focusX, y: relY + focusY, z: 0 };
+      return { x: sx + camX, y: sy + camY, z: 0 };
     }
 
     /**
-     * Bloc dont la face projetée contient le pixel écran. Sert quand la
-     * caméra n'est plus de profil sud (le simple unproject suffit sinon).
+     * Bloc solide correspondant au pixel écran dans la vue de base.
      */
     function pickSolid(screenX, screenY, view) {
       const size = Math.max(1, Number(view && view.blockSize) || 48);
       const baseY = Number(view && view.baseY) || 0;
       const getBlock = view && view.getBlock;
       if (typeof getBlock !== "function") return null;
-      const focusX = view.focusX != null ? Number(view.focusX) : 0;
-      const focusY = view.focusY != null ? Number(view.focusY) : baseY;
-      const pc = Math.floor(focusX / size);
-      const pr = Math.floor((focusY - baseY) / size);
-      let best = null;
-      let bestDepth = -Infinity;
-      for (let row = pr - 10; row <= pr + 10; row++) {
-        for (let column = pc - 12; column <= pc + 12; column++) {
-          const block = getBlock(column, row);
-          if (!block) continue;
-          const corners = [
-            project(block.x, block.y, 0, view),
-            project(block.x + size, block.y, 0, view),
-            project(block.x, block.y + size, 0, view),
-            project(block.x + size, block.y + size, 0, view),
-            project(block.x, block.y, -size, view),
-            project(block.x + size, block.y, -size, view),
-          ];
-          let minX = Infinity;
-          let maxX = -Infinity;
-          let minY = Infinity;
-          let maxY = -Infinity;
-          let depth = 0;
-          for (let i = 0; i < corners.length; i++) {
-            const p = corners[i];
-            if (p.x < minX) minX = p.x;
-            if (p.x > maxX) maxX = p.x;
-            if (p.y < minY) minY = p.y;
-            if (p.y > maxY) maxY = p.y;
-            depth += p.depth;
-          }
-          depth /= corners.length;
-          if (screenX >= minX && screenX <= maxX && screenY >= minY && screenY <= maxY) {
-            if (depth > bestDepth) {
-              bestDepth = depth;
-              best = block;
-            }
-          }
-        }
-      }
-      return best;
+      const camX = Number(view && view.camX) || 0;
+      const camY = Number(view && view.camY) || 0;
+      const col = Math.floor((screenX + camX) / size);
+      const row = Math.floor((screenY + camY - baseY) / size);
+      return getBlock(col, row);
     }
 
     function alphaKey(column, row, zTile) {
@@ -293,7 +214,7 @@ window.PixWorldCamera = (() => {
     }
 
     function zExtent() {
-      return isIdentity() ? 0 : Z_EXTENT;
+      return 0;
     }
 
     return {

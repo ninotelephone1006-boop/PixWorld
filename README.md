@@ -1,6 +1,6 @@
 # PixWorld
 
-Jeu de plateforme 2D en HTML Canvas, **jouable à plusieurs dans le navigateur**, avec une **vue 2,5D pixel art** (cubes 3/4, caméra à 4 directions). Choisis ton héros dans l'écran titre, puis explore un niveau façon RPG 2D.
+Jeu de plateforme 2D en HTML Canvas, **jouable à plusieurs dans le navigateur**, avec une **vue 2,5D pixel art** (cubes 3/4). Choisis ton héros dans l'écran titre, puis explore un niveau façon RPG 2D.
 
 ## Jouer ensemble par le lien
 
@@ -134,8 +134,8 @@ Le terrain de chaque colonne est une grille de blocs carrés de **32 × 32 px** 
 - **Butin de mort** : tout le stock d'herbe, de terre et de pierre est lâché à la position exacte du K.O., en une pile par type avec sa quantité. Le corps ne ramasse rien ; après réapparition, toi ou un autre joueur pouvez récupérer les piles entières. Elles restent disponibles jusqu'au ramassage (ou au redémarrage du serveur / à la fermeture de l'onglet hors ligne), sans casser les blocs autour.
 - La barre verticale de raccourcis, au **milieu du bord droit**, affiche les trois blocs et leurs quantités. Fais défiler la molette (ou utilise `1`, `2`, `3`) pour changer d'emplacement ; tu peux aussi cliquer sur un emplacement.
 - **Caméra verticale** : en surface, seules **deux rangées de blocs** sont visibles sous le sol (herbe + terre) — la roche n'apparaît que lorsqu'on creuse, la caméra descendant alors avec le joueur.
-- **Vue 2,5D pixel art** : le terrain se dessine en cubes 3/4 (face avant, dessus, flanc), comme un RPG 2D vu de trois-quarts. Le plan de jeu (collisions, minage, saut) reste le monde 2D d'origine.
-- **Regarder autour** : les **flèches** tournent la caméra vers le **sud, l'est, le nord ou l'ouest**, avec une interpolation fluide. `A`/`Q` et `D` déplacent toujours le personnage dans le monde ; `Espace` saute. En vue sud, la projection est identique à l'ancien repère écran (clics, visée, tests).
+- **Vue 2,5D pixel art** : le terrain se dessine en cubes 3/4 (face avant, dessus, flanc), comme un RPG 2D vu de trois-quarts. Seule la vue de base (face sud, repère écran 2D) est active ; les autres directions de caméra ont été retirées. Le plan de jeu (collisions, minage, saut) reste le monde 2D d'origine.
+- **Contrôles** : `A`/`Q`, `D` ainsi que les **flèches gauche et droite** déplacent le personnage dans le monde ; `Espace` saute.
 - **Visibilité sous terre** : les blocs situés **au-dessus du joueur** s'estompent tant qu'ils gênent la vue, puis retrouvent progressivement leur opacité dès que l'on s'éloigne. Le héros reste visible dans le trou.
 - Les modifications du terrain sont gardées en mémoire par le serveur de l'arène ; elles sont partagées par les joueurs connectés et disparaissent lors d'un redémarrage du serveur. Sans connexion, le minage et la pose fonctionnent localement dans l'onglet.
 
